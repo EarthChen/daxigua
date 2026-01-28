@@ -51,6 +51,11 @@ class Game {
         this.canDrop = true;
         this.lastDropTime = 0;
 
+        // 自动下落倒计时（10秒）
+        this.autoDropCountdown = 10;
+        this.lastCountdownUpdate = Date.now();
+        this.autoDropEnabled = true;
+
         // 道具
         this.tools = this.loadTools();
         this.hammerMode = false;
@@ -309,6 +314,8 @@ class Game {
         setTimeout(() => {
             this.canDrop = true;
             this.generateNextFruit();
+            // 重置自动下落倒计时
+            this.resetAutoDropCountdown();
         }, RULES.dropCooldown);
     }
 
@@ -395,7 +402,6 @@ class Game {
 
     checkGameOver() {
         const gameOverY = this.gameArea.gameOverLineY;
-        let hasAboveLine = false;
 
         for (const body of this.world.bodies) {
             if (body.label !== 'fruit' || body.isRemoved) continue;
@@ -403,28 +409,17 @@ class Game {
 
             // 检查水果顶部是否超过游戏结束线
             const fruitTop = body.position.y - body.radius;
+            // 当水果顶部超过警戒线且速度较慢时，立即结束游戏
             if (fruitTop < gameOverY && body.velocity.lengthSq() < 1) {
-                hasAboveLine = true;
-                this.fruitsAboveLine.add(body.id);
-            } else {
-                this.fruitsAboveLine.delete(body.id);
+                this.gameOver();
+                return; // 立即返回，避免重复调用
             }
         }
 
-        if (hasAboveLine) {
-            if (!this.gameOverCheckTimer) {
-                this.gameOverCheckTimer = setTimeout(() => {
-                    if (this.fruitsAboveLine.size > 0) {
-                        this.gameOver();
-                    }
-                    this.gameOverCheckTimer = null;
-                }, RULES.gameOverDelay);
-            }
-        } else {
-            if (this.gameOverCheckTimer) {
-                clearTimeout(this.gameOverCheckTimer);
-                this.gameOverCheckTimer = null;
-            }
+        // 清理旧的计时器（如果存在）
+        if (this.gameOverCheckTimer) {
+            clearTimeout(this.gameOverCheckTimer);
+            this.gameOverCheckTimer = null;
         }
     }
 
@@ -457,6 +452,9 @@ class Game {
         this.mergeEffects = [];
         this.toasts = [];
         this.fruitsAboveLine.clear();
+
+        // 重置自动下落倒计时
+        this.resetAutoDropCountdown();
 
         // 重新创建墙壁
         this.createWalls();
@@ -834,6 +832,9 @@ class Game {
             this.world.update(dt);
             this.handleCollisions();
             this.checkGameOver();
+            
+            // 更新自动下落倒计时
+            this.updateAutoDropCountdown(now);
         }
 
         // 更新特效
@@ -844,6 +845,28 @@ class Game {
 
         // 下一帧
         requestAnimationFrame(() => this.loop());
+    }
+
+    // 更新自动下落倒计时
+    updateAutoDropCountdown(now) {
+        if (!this.autoDropEnabled || !this.canDrop) return;
+
+        const elapsed = (now - this.lastCountdownUpdate) / 1000;
+        if (elapsed >= 1) {
+            this.autoDropCountdown -= Math.floor(elapsed);
+            this.lastCountdownUpdate = now;
+
+            // 倒计时结束，自动投放
+            if (this.autoDropCountdown <= 0) {
+                this.dropFruit();
+            }
+        }
+    }
+
+    // 重置自动下落倒计时
+    resetAutoDropCountdown() {
+        this.autoDropCountdown = 10;
+        this.lastCountdownUpdate = Date.now();
     }
 
     updateEffects() {
@@ -880,11 +903,22 @@ class Game {
             renderer.drawDropLine(this.dropX, FRUITS[this.currentFruitLevel], this.gameArea.gameOverLineY);
 
             // 绘制待投放水果
+            const pendingY = this.gameArea.gameOverLineY - FRUITS[this.currentFruitLevel].radius - 10;
             renderer.drawPendingFruit(
                 this.dropX,
-                this.gameArea.gameOverLineY - FRUITS[this.currentFruitLevel].radius - 10,
+                pendingY,
                 this.currentFruitLevel
             );
+
+            // 绘制自动下落倒计时
+            if (this.canDrop && this.autoDropEnabled) {
+                renderer.drawAutoDropCountdown(
+                    this.dropX,
+                    pendingY,
+                    this.autoDropCountdown,
+                    this.currentFruitLevel
+                );
+            }
         }
 
         // 绘制所有水果

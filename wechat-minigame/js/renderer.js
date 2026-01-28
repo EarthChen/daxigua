@@ -101,23 +101,10 @@ class Renderer {
         ctx.restore();
     }
 
-    // 绘制当前水果预览线
+    // 绘制当前水果预览线（已禁用竖线绘制）
     drawDropLine(x, fruit, gameOverLineY) {
-        if (!fruit) return;
-        
-        const ctx = this.ctx;
-        const pr = this.pixelRatio;
-
-        // 虚线
-        ctx.save();
-        ctx.setLineDash([5 * pr, 5 * pr]);
-        ctx.strokeStyle = 'rgba(255, 204, 0, 0.6)';
-        ctx.lineWidth = 2 * pr;
-        ctx.beginPath();
-        ctx.moveTo(x * pr, gameOverLineY * pr);
-        ctx.lineTo(x * pr, this.gameArea.groundY * pr);
-        ctx.stroke();
-        ctx.restore();
+        // 不再绘制下落竖线，直接返回
+        return;
     }
 
     // 绘制待投放的水果
@@ -130,6 +117,44 @@ class Renderer {
 
         // 绘制水果
         this.drawFruit(x, y, fruit.radius, fruitLevel, 0.8);
+    }
+
+    // 绘制自动下落倒计时
+    drawAutoDropCountdown(x, y, countdown, fruitLevel) {
+        if (countdown <= 0) return;
+        
+        const ctx = this.ctx;
+        const pr = this.pixelRatio;
+        const fruit = FRUITS[fruitLevel];
+        if (!fruit) return;
+
+        const radius = fruit.radius;
+
+        // 在水果下方绘制倒计时圆环
+        ctx.save();
+
+        // 倒计时背景圆
+        ctx.beginPath();
+        ctx.arc(x * pr, (y + radius + 25) * pr, 18 * pr, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fill();
+
+        // 倒计时进度圆环
+        const progress = countdown / 10;
+        ctx.beginPath();
+        ctx.arc(x * pr, (y + radius + 25) * pr, 18 * pr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+        ctx.strokeStyle = countdown <= 3 ? '#ff4444' : '#ffcc00';
+        ctx.lineWidth = 3 * pr;
+        ctx.stroke();
+
+        // 倒计时数字
+        ctx.fillStyle = countdown <= 3 ? '#ff4444' : '#fff';
+        ctx.font = `bold ${14 * pr}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(Math.ceil(countdown)), x * pr, (y + radius + 25) * pr);
+
+        ctx.restore();
     }
 
     // 绘制单个水果
