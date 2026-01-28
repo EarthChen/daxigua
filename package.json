@@ -1,0 +1,23 @@
+{
+  "name": "daxigua",
+  "version": "1.0.0",
+  "description": "合成大西瓜 - 基于cocos2d-js的小游戏",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "serve -l 5000",
+    "start": "serve -l 5000",
+    "preview": "serve -l 3000"
+  },
+  "keywords": [
+    "game",
+    "cocos2d",
+    "watermelon",
+    "daxigua"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}
