@@ -4,8 +4,11 @@
  * 支持微信小程序和 Web 环境
  */
 
+(function() {
+'use strict';
+
 // 环境适配导入
-let Platform, Config;
+var Platform, Config;
 
 if (typeof require !== 'undefined') {
     Platform = require('./platform');
@@ -15,7 +18,17 @@ if (typeof require !== 'undefined') {
     Config = window.GameConfig;
 }
 
-const { COLORS, FRUITS, GAME_AREA, RULES, __DEV__, COMBO, FEVER, WEATHER, BOMB, ICE_BLOCK, BUFFS } = Config || {};
+var COLORS = Config ? Config.COLORS : {};
+var FRUITS = Config ? Config.FRUITS : [];
+var GAME_AREA = Config ? Config.GAME_AREA : {};
+var RULES = Config ? Config.RULES : {};
+var __DEV__ = Config ? Config.__DEV__ : false;
+var COMBO = Config ? Config.COMBO : {};
+var FEVER = Config ? Config.FEVER : {};
+var WEATHER = Config ? Config.WEATHER : {};
+var BOMB = Config ? Config.BOMB : {};
+var ICE_BLOCK = Config ? Config.ICE_BLOCK : {};
+var BUFFS = Config ? Config.BUFFS : {};
 
 class Renderer {
     constructor(config) {
@@ -148,7 +161,7 @@ class Renderer {
     }
 
     // 绘制自动下落倒计时
-    drawAutoDropCountdown(x, y, countdown, fruitLevel) {
+    drawAutoDropCountdown(x, y, countdown, fruitLevel, maxCountdown = 15) {
         if (countdown <= 0) return;
         
         const ctx = this.ctx;
@@ -167,8 +180,8 @@ class Renderer {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
         ctx.fill();
 
-        // 倒计时进度圆环
-        const progress = countdown / 10;
+        // 倒计时进度圆环（使用动态最大值）
+        const progress = countdown / maxCountdown;
         ctx.beginPath();
         ctx.arc(x * pr, (y + radius + 25) * pr, 18 * pr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
         ctx.strokeStyle = countdown <= 3 ? '#ff4444' : '#ffcc00';
@@ -915,23 +928,23 @@ class Renderer {
     }
 
     // 绘制调试面板（仅开发环境）
-    drawDebugPanel() {
+    drawDebugPanel(debugState = {}) {
         if (!__DEV__) return [];
         
         const ctx = this.ctx;
         const pr = this.pixelRatio;
 
         // 遮罩
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // 面板
-        const panelWidth = 280;
-        const panelHeight = 380;
+        // 面板 - 扩大高度以容纳更多按钮
+        const panelWidth = 340;
+        const panelHeight = 680;
         const panelX = (this.width - panelWidth) / 2;
         const panelY = (this.height - panelHeight) / 2;
 
-        ctx.fillStyle = '#2c3e50';
+        ctx.fillStyle = '#1a1a2e';
         this.roundRect(ctx, panelX * pr, panelY * pr, panelWidth * pr, panelHeight * pr, 20 * pr);
         ctx.fill();
 
@@ -939,99 +952,215 @@ class Renderer {
         ctx.fillStyle = '#fff';
         ctx.font = `bold ${18 * pr}px Arial`;
         ctx.textAlign = 'center';
-        ctx.fillText('🔧 调试面板', (this.width / 2) * pr, (panelY + 35) * pr);
+        ctx.fillText('🔧 调试面板', (this.width / 2) * pr, (panelY + 30) * pr);
 
         // 提示
-        ctx.font = `${11 * pr}px Arial`;
+        ctx.font = `${10 * pr}px Arial`;
         ctx.fillStyle = '#f39c12';
-        ctx.fillText('⚠️ 仅开发环境可用', (this.width / 2) * pr, (panelY + 58) * pr);
+        ctx.fillText('⚠️ 仅开发环境可用', (this.width / 2) * pr, (panelY + 48) * pr);
 
         const hitAreas = [];
-        const btnWidth = 120;
-        const btnHeight = 40;
-        const gap = 10;
-        const startY = panelY + 80;
+        const btnWidth = 100;
+        const btnHeight = 32;
+        const gap = 8;
+        let currentY = panelY + 65;
 
-        // 道具按钮组
+        // === 道具区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('📦 道具', (panelX + 15) * pr, currentY * pr);
+        currentY += 20;
+
         const toolButtons = [
-            { label: '🔨 +5 锤子', toolType: 'hammer' },
-            { label: '🍇 +5 选果', toolType: 'selectFruit' },
-            { label: '⏭️ +5 跳过', toolType: 'skip' }
+            { label: '🔨 +5', action: 'addTool', toolType: 'hammer' },
+            { label: '🍇 +5', action: 'addTool', toolType: 'selectFruit' },
+            { label: '⏭️ +5', action: 'addTool', toolType: 'skip' }
         ];
 
         toolButtons.forEach((btn, i) => {
+            const x = panelX + 15 + i * (btnWidth + gap);
+            ctx.fillStyle = '#3498db';
+            this.roundRect(ctx, x * pr, currentY * pr, btnWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, toolType: btn.toolType, x, y: currentY, width: btnWidth, height: btnHeight });
+        });
+        currentY += btnHeight + gap;
+
+        // 清空道具 + 分数
+        const halfWidth = (panelWidth - 40 - gap) / 2;
+        ctx.fillStyle = '#e74c3c';
+        this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText('🗑️ 清道具', (panelX + 15 + halfWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+        hitAreas.push({ action: 'clearTools', x: panelX + 15, y: currentY, width: halfWidth, height: btnHeight });
+
+        ctx.fillStyle = '#27ae60';
+        this.roundRect(ctx, (panelX + 15 + halfWidth + gap) * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText('📈 +100分', (panelX + 15 + halfWidth + gap + halfWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+        hitAreas.push({ action: 'addScore', x: panelX + 15 + halfWidth + gap, y: currentY, width: halfWidth, height: btnHeight });
+        currentY += btnHeight + 15;
+
+        // === 特效触发区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('⚡ 触发效果', (panelX + 15) * pr, currentY * pr);
+        currentY += 20;
+
+        const effectButtons = [
+            { label: '🔥 Fever', action: 'triggerFever', color: '#ff6b35' },
+            { label: '🌤️ 天气', action: 'triggerWeather', color: '#00bcd4' },
+            { label: '⚠️ 地震', action: 'triggerEarthquake', color: '#795548' }
+        ];
+
+        effectButtons.forEach((btn, i) => {
+            const x = panelX + 15 + i * (btnWidth + gap);
+            ctx.fillStyle = btn.color;
+            this.roundRect(ctx, x * pr, currentY * pr, btnWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: btnWidth, height: btnHeight });
+        });
+        currentY += btnHeight + gap;
+
+        // Combo 按钮
+        ctx.fillStyle = '#9c27b0';
+        this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, (panelWidth - 30) * pr, btnHeight * pr, 6 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText('🔥 Combo +5', (this.width / 2) * pr, (currentY + btnHeight / 2) * pr);
+        hitAreas.push({ action: 'addCombo', x: panelX + 15, y: currentY, width: panelWidth - 30, height: btnHeight });
+        currentY += btnHeight + 15;
+
+        // === 生成实体区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('🎲 生成实体', (panelX + 15) * pr, currentY * pr);
+        currentY += 20;
+
+        const spawnButtons = [
+            { label: '🎁 盲盒', action: 'spawnMysteryBox', color: '#8b4513' },
+            { label: '💣 炸弹', action: 'spawnBomb', color: '#2c3e50' },
+            { label: '🧊 冰果', action: 'spawnIceFruit', color: '#00acc1' }
+        ];
+
+        spawnButtons.forEach((btn, i) => {
+            const x = panelX + 15 + i * (btnWidth + gap);
+            ctx.fillStyle = btn.color;
+            this.roundRect(ctx, x * pr, currentY * pr, btnWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: btnWidth, height: btnHeight });
+        });
+        currentY += btnHeight + gap;
+
+        // 生成水果 + 清空水果
+        ctx.fillStyle = '#4caf50';
+        this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText('🍇 随机果', (panelX + 15 + halfWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+        hitAreas.push({ action: 'spawnFruit', x: panelX + 15, y: currentY, width: halfWidth, height: btnHeight });
+
+        ctx.fillStyle = '#f44336';
+        this.roundRect(ctx, (panelX + 15 + halfWidth + gap) * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText('🗑️ 清水果', (panelX + 15 + halfWidth + gap + halfWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+        hitAreas.push({ action: 'clearAllFruits', x: panelX + 15 + halfWidth + gap, y: currentY, width: halfWidth, height: btnHeight });
+        currentY += btnHeight + 15;
+
+        // === 系统开关区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('⚙️ 系统开关（点击切换）', (panelX + 15) * pr, currentY * pr);
+        currentY += 20;
+
+        const toggleButtons = [
+            { label: '🌤️ 天气', action: 'toggleWeather', key: 'weatherEnabled' },
+            { label: '⚠️ 地震', action: 'toggleEarthquake', key: 'earthquakeEnabled' },
+            { label: '🎁 盲盒', action: 'toggleMysteryBox', key: 'mysteryBoxEnabled' },
+            { label: '🧊 冰封', action: 'toggleIceBlock', key: 'iceBlockEnabled' }
+        ];
+
+        const toggleWidth = (panelWidth - 30 - gap) / 2;
+        toggleButtons.forEach((btn, i) => {
             const row = Math.floor(i / 2);
             const col = i % 2;
-            const x = panelX + 20 + col * (btnWidth + gap);
-            const y = startY + row * (btnHeight + gap);
-
-            ctx.fillStyle = '#3498db';
-            this.roundRect(ctx, x * pr, y * pr, btnWidth * pr, btnHeight * pr, 8 * pr);
+            const x = panelX + 15 + col * (toggleWidth + gap);
+            const y = currentY + row * (btnHeight + gap);
+            
+            const isEnabled = debugState[btn.key] !== false;
+            ctx.fillStyle = isEnabled ? '#2ecc71' : '#7f8c8d';
+            this.roundRect(ctx, x * pr, y * pr, toggleWidth * pr, btnHeight * pr, 6 * pr);
             ctx.fill();
-
+            
             ctx.fillStyle = '#fff';
-            ctx.font = `${13 * pr}px Arial`;
-            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (y + btnHeight / 2) * pr);
-
-            hitAreas.push({
-                action: 'addTool',
-                toolType: btn.toolType,
-                x, y, width: btnWidth, height: btnHeight
-            });
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            const statusText = isEnabled ? '开' : '关';
+            ctx.fillText(`${btn.label} ${statusText}`, (x + toggleWidth / 2) * pr, (y + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y, width: toggleWidth, height: btnHeight });
         });
+        currentY += 2 * (btnHeight + gap) + 10;
 
-        // 清空道具按钮
-        const clearY = startY + 2 * (btnHeight + gap);
-        ctx.fillStyle = '#e74c3c';
-        this.roundRect(ctx, (panelX + 20) * pr, clearY * pr, (panelWidth - 40) * pr, btnHeight * pr, 8 * pr);
+        // === 状态信息区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('📊 当前状态', (panelX + 15) * pr, currentY * pr);
+        currentY += 18;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, (panelWidth - 30) * pr, 60 * pr, 6 * pr);
         ctx.fill();
 
-        ctx.fillStyle = '#fff';
-        ctx.font = `${13 * pr}px Arial`;
-        ctx.fillText('🗑️ 清空所有道具', (this.width / 2) * pr, (clearY + btnHeight / 2) * pr);
-
-        hitAreas.push({
-            action: 'clearTools',
-            x: panelX + 20,
-            y: clearY,
-            width: panelWidth - 40,
-            height: btnHeight
+        ctx.fillStyle = '#a0aec0';
+        ctx.font = `${10 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        const stateLines = [
+            `水果数: ${debugState.fruitCount || 0} | Combo: ${debugState.comboCount || 0}`,
+            `Fever: ${debugState.isFeverMode ? '是' : '否'} | 天气: ${debugState.currentWeather || '无'}`,
+            `自动下落: ${debugState.autoDropTime || 15}秒`
+        ];
+        stateLines.forEach((line, i) => {
+            ctx.fillText(line, (panelX + 25) * pr, (currentY + 18 + i * 16) * pr);
         });
-
-        // 加分按钮
-        const scoreY = clearY + btnHeight + gap;
-        ctx.fillStyle = '#27ae60';
-        this.roundRect(ctx, (panelX + 20) * pr, scoreY * pr, (panelWidth - 40) * pr, btnHeight * pr, 8 * pr);
-        ctx.fill();
-
-        ctx.fillStyle = '#fff';
-        ctx.fillText('📈 分数 +100', (this.width / 2) * pr, (scoreY + btnHeight / 2) * pr);
-
-        hitAreas.push({
-            action: 'addScore',
-            x: panelX + 20,
-            y: scoreY,
-            width: panelWidth - 40,
-            height: btnHeight
-        });
+        currentY += 70;
 
         // 关闭按钮
-        const closeY = panelY + panelHeight - 55;
-        const closeWidth = 100;
+        const closeWidth = 120;
         const closeX = (this.width - closeWidth) / 2;
 
-        ctx.fillStyle = '#7f8c8d';
-        this.roundRect(ctx, closeX * pr, closeY * pr, closeWidth * pr, 40 * pr, 20 * pr);
+        ctx.fillStyle = '#667eea';
+        this.roundRect(ctx, closeX * pr, currentY * pr, closeWidth * pr, 40 * pr, 20 * pr);
         ctx.fill();
 
         ctx.fillStyle = '#fff';
-        ctx.font = `${14 * pr}px Arial`;
-        ctx.fillText('关闭', (this.width / 2) * pr, (closeY + 20) * pr);
+        ctx.font = `bold ${14 * pr}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText('关闭', (this.width / 2) * pr, (currentY + 20) * pr);
 
         hitAreas.push({
             action: 'close',
             x: closeX,
-            y: closeY,
+            y: currentY,
             width: closeWidth,
             height: 40
         });
@@ -1664,3 +1793,5 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof window !== 'undefined') {
     window.Renderer = Renderer;
 }
+
+})(); // 关闭 IIFE

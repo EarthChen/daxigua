@@ -1,3 +1,6 @@
 .idea
 .vercel
 node_modules
+.cursor/
+.playwright-mcp/
+backup-cocos2d-web/

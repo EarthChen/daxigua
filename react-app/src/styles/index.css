@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 全局样式 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  background: linear-gradient(180deg, #fef3c7 0%, #f5deb3 100%);
+}
+
+/* Canvas 样式 */
+canvas {
+  display: block;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 工具按钮样式 */
+@layer components {
+  .tool-btn {
+    @apply flex flex-col items-center justify-center p-2 rounded-xl
+           bg-gradient-to-b from-amber-200 to-amber-300 
+           hover:from-amber-100 hover:to-amber-200 
+           active:scale-95 shadow-md
+           transition-all duration-150 relative min-w-[60px]
+           border border-amber-400/50;
+  }
+
+  .tool-btn-disabled {
+    @apply opacity-40 cursor-not-allowed grayscale;
+  }
+
+  .tool-count {
+    @apply absolute -top-1.5 -right-1.5 w-5 h-5 
+           bg-gradient-to-b from-red-500 to-red-600 
+           text-white text-xs font-bold
+           rounded-full flex items-center justify-center
+           shadow-md border border-red-400;
+  }
+
+  .panel-overlay {
+    @apply fixed inset-0 bg-black/80 backdrop-blur-sm 
+           flex items-center justify-center z-50
+           animate-[fadeIn_0.2s_ease-out];
+  }
+
+  .panel-content {
+    @apply bg-gradient-to-b from-amber-50 to-white 
+           rounded-2xl p-6 max-w-sm w-[90%] 
+           shadow-2xl border border-amber-200
+           animate-[scaleIn_0.2s_ease-out];
+  }
+
+  .buff-card {
+    @apply flex flex-col items-center p-4 rounded-xl
+           bg-gradient-to-b from-slate-600 to-slate-800
+           border-2 border-yellow-400 cursor-pointer
+           hover:scale-105 hover:border-yellow-300
+           transition-all duration-200 shadow-lg;
+  }
+}
+
+/* 动画关键帧 */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* 动画 */
+@keyframes combo-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.combo-animate {
+  animation: combo-pop 0.3s ease-out;
+}
+
+/* Fever 模式背景效果 */
+.fever-bg {
+  animation: fever-pulse 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes fever-pulse {
+  0% { box-shadow: inset 0 0 50px rgba(255, 100, 0, 0.1); }
+  100% { box-shadow: inset 0 0 100px rgba(255, 100, 0, 0.2); }
+}
