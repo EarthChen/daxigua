@@ -3,36 +3,12 @@
  * 实现圆形刚体、重力、碰撞检测和响应
  */
 
-(function() {
-'use strict';
-
-// 环境适配导入
-var PHYSICS;
-if (typeof require !== 'undefined' && typeof module !== 'undefined') {
-    // Node.js / 小程序环境
-    PHYSICS = require('./config').PHYSICS;
-} else if (typeof window !== 'undefined' && window.GameConfig) {
-    // Web 浏览器环境
-    PHYSICS = window.GameConfig.PHYSICS;
-} else {
-    // 默认物理参数
-    PHYSICS = {
-        gravity: { x: 0, y: 1.2 },
-        friction: 0.3,
-        frictionStatic: 0.6,
-        restitution: 0.05,
-        frictionAir: 0.02,
-        sleepThreshold: 30,
-        sleepVelocityLimit: 0.5,
-        positionIterations: 4,
-        velocityDamping: 0.98
-    };
-}
+import { PHYSICS } from './config';
 
 /**
  * 2D 向量类
  */
-class Vector {
+export class Vector {
     constructor(x = 0, y = 0) {
         this.x = x;
         this.y = y;
@@ -79,7 +55,9 @@ class Vector {
 /**
  * 圆形刚体类
  */
-class Circle {
+export class Circle {
+    static nextId = 0;
+    
     constructor(x, y, radius, options = {}) {
         this.id = Circle.nextId++;
         this.position = new Vector(x, y);
@@ -102,14 +80,31 @@ class Circle {
         this.fruitLevel = options.fruitLevel;
         this.isRemoved = false;
         
-        // 用于合成检测
+        // 用于合成检测和特殊属性
         this.justCreated = true;
-        this.createdAt = Date.now();
+        this.createdAt = options.createdAt || Date.now();
+        
+        // 特殊水果属性
+        this.isMysteryBox = options.isMysteryBox || false;
+        this.mysteryState = options.mysteryState || null;
+        this.iceState = options.iceState || null;
+        this.isBomb = options.isBomb || false;
+        this.frozen = options.frozen || false;
     }
 
     applyForce(force) {
         if (this.isStatic) return;
         this.acceleration = this.acceleration.add(force.mult(this.invMass));
+    }
+
+    applyImpulse(impulse) {
+        if (this.isStatic) return;
+        // 支持普通对象和 Vector
+        const impulseVec = impulse instanceof Vector 
+            ? impulse 
+            : new Vector(impulse.x || 0, impulse.y || 0);
+        this.velocity = this.velocity.add(impulseVec.mult(this.invMass));
+        this.wake();
     }
 
     update(dt, gravity) {
@@ -120,26 +115,38 @@ class Circle {
             this.justCreated = false;
         }
 
-        // 应用重力
-        this.velocity = this.velocity.add(new Vector(gravity.x, gravity.y).mult(dt));
+        // 应用重力（平滑加速）
+        const gravityForce = new Vector(gravity.x, gravity.y).mult(dt);
+        this.velocity = this.velocity.add(gravityForce);
         
         // 应用加速度
         this.velocity = this.velocity.add(this.acceleration.mult(dt));
         
-        // 应用空气阻力
-        this.velocity = this.velocity.mult(1 - this.frictionAir);
+        // 应用空气阻力（轻微阻尼）
+        const airResistance = 1 - this.frictionAir;
+        this.velocity = this.velocity.mult(airResistance);
         
-        // 更新位置
+        // 限制最大速度，防止穿透
+        const maxSpeed = 15;
+        const speed = this.velocity.length();
+        if (speed > maxSpeed) {
+            this.velocity = this.velocity.mult(maxSpeed / speed);
+        }
+        
+        // 更新位置（使用半隐式欧拉法更稳定）
         this.position = this.position.add(this.velocity.mult(dt));
         
         // 重置加速度
         this.acceleration = new Vector(0, 0);
         
         // 休眠检测
-        if (this.velocity.lengthSq() < 0.1) {
+        const sleepThreshold = PHYSICS.sleepVelocityLimit || 0.3;
+        if (this.velocity.lengthSq() < sleepThreshold * sleepThreshold) {
             this.sleepCounter++;
             if (this.sleepCounter > PHYSICS.sleepThreshold) {
                 this.isSleeping = true;
+                // 完全停止
+                this.velocity = new Vector(0, 0);
             }
         } else {
             this.sleepCounter = 0;
@@ -153,12 +160,12 @@ class Circle {
     }
 }
 
-Circle.nextId = 0;
-
 /**
  * 矩形刚体类（用于墙壁和地面）
  */
-class Rectangle {
+export class Rectangle {
+    static nextId = 1000;
+    
     constructor(x, y, width, height, options = {}) {
         this.id = Rectangle.nextId++;
         this.position = new Vector(x, y);
@@ -170,12 +177,10 @@ class Rectangle {
     }
 }
 
-Rectangle.nextId = 1000;
-
 /**
  * 物理世界
  */
-class World {
+export class World {
     constructor(options = {}) {
         this.gravity = options.gravity || { x: PHYSICS.gravity.x, y: PHYSICS.gravity.y };
         this.bodies = [];
@@ -207,15 +212,15 @@ class World {
     }
 
     update(dt = 1/60) {
-        // 更新所有刚体
+        // 更新所有刚体（使用固定的时间步长）
+        const fixedDt = 1.0;  // 固定时间步长
         for (const body of this.bodies) {
             if (!body.isSleeping) {
-                body.update(dt * 60, this.gravity);
+                body.update(fixedDt, this.gravity);
                 
                 // 应用速度阻尼
-                if (PHYSICS.velocityDamping) {
-                    body.velocity = body.velocity.mult(PHYSICS.velocityDamping);
-                }
+                const damping = PHYSICS.velocityDamping || 0.99;
+                body.velocity = body.velocity.mult(damping);
             }
         }
 
@@ -299,20 +304,20 @@ class World {
 
             // 分离重叠的物体（使用更平滑的分离）
             const totalMass = bodyA.invMass + bodyB.invMass;
-            if (totalMass > 0 && overlap > 0.1) {
-                // 使用较小的分离比例，避免过度校正导致抖动
-                const slop = 0.5;  // 允许的穿透深度
-                const percent = 0.4;  // 位置修正比例
+            if (totalMass > 0 && overlap > 0.05) {
+                // 使用配置的参数
+                const slop = PHYSICS.collisionSlop || 0.3;
+                const percent = PHYSICS.collisionPercent || 0.5;
                 const correctionMag = Math.max(overlap - slop, 0) / totalMass * percent;
                 const correction = normal.mult(correctionMag);
                 
-                if (!bodyA.isStatic && !bodyA.isSleeping) {
+                if (!bodyA.isStatic) {
                     bodyA.position = bodyA.position.sub(correction.mult(bodyA.invMass));
-                    bodyA.wake();
+                    if (bodyA.isSleeping) bodyA.wake();
                 }
-                if (!bodyB.isStatic && !bodyB.isSleeping) {
+                if (!bodyB.isStatic) {
                     bodyB.position = bodyB.position.add(correction.mult(bodyB.invMass));
-                    bodyB.wake();
+                    if (bodyB.isSleeping) bodyB.wake();
                 }
             }
 
@@ -326,25 +331,33 @@ class World {
             // 如果物体正在分离，不处理
             if (velAlongNormal > 0) continue;
 
-            // 计算弹性系数（对于低速碰撞降低弹性）
-            const speedThreshold = 2.0;
+            // 计算弹性系数
+            // 使用平均值而非最小值，让弹性更明显
             const speed = Math.abs(velAlongNormal);
-            let e = Math.min(bodyA.restitution, bodyB.restitution);
+            let e = (bodyA.restitution + bodyB.restitution) / 2;
+            
+            // 只在极低速时降低弹性
+            const speedThreshold = 0.8;
             if (speed < speedThreshold) {
-                e *= speed / speedThreshold;  // 低速时减少弹性
+                e *= 0.3 + 0.7 * (speed / speedThreshold);
             }
+            
+            // 增加最小弹性，确保有回弹感
+            e = Math.max(e, 0.08);
 
             // 计算冲量
             let j = -(1 + e) * velAlongNormal;
             j /= totalMass;
 
-            // 应用冲量
-            const impulse = normal.mult(j);
-            if (!bodyA.isStatic && !bodyA.isSleeping) {
+            // 应用冲量，增加一点额外的弹跳
+            const impulse = normal.mult(j * 1.1);
+            if (!bodyA.isStatic) {
                 bodyA.velocity = bodyA.velocity.sub(impulse.mult(bodyA.invMass));
+                if (bodyA.isSleeping) bodyA.wake();
             }
-            if (!bodyB.isStatic && !bodyB.isSleeping) {
+            if (!bodyB.isStatic) {
                 bodyB.velocity = bodyB.velocity.add(impulse.mult(bodyB.invMass));
+                if (bodyB.isSleeping) bodyB.wake();
             }
 
             // 应用摩擦力
@@ -394,21 +407,32 @@ class World {
                     if (dist > 0) {
                         const normal = new Vector(dx / dist, dy / dist);
                         
-                        // 分离
-                        body.position = body.position.add(normal.mult(overlap));
+                        // 分离（确保完全分开）
+                        body.position = body.position.add(normal.mult(overlap + 0.5));
                         
                         // 反弹
                         const velDotNormal = body.velocity.dot(normal);
                         if (velDotNormal < 0) {
-                            const bounce = normal.mult(-velDotNormal * (1 + body.restitution));
+                            // 增加墙壁弹性
+                            const wallRestitution = 0.3;
+                            const effectiveRestitution = Math.max(body.restitution, wallRestitution);
+                            const bounceStrength = -velDotNormal * (1 + effectiveRestitution);
+                            const bounce = normal.mult(bounceStrength);
                             body.velocity = body.velocity.add(bounce);
                             
                             // 摩擦
                             const tangent = new Vector(-normal.y, normal.x);
                             const velDotTangent = body.velocity.dot(tangent);
-                            body.velocity = body.velocity.sub(tangent.mult(velDotTangent * body.friction));
+                            body.velocity = body.velocity.sub(tangent.mult(velDotTangent * body.friction * 0.8));
                         }
                         
+                        body.wake();
+                    } else {
+                        // 完全重叠，强制推出
+                        const pushDir = wall.label === 'ground' ? new Vector(0, -1) :
+                                       wall.label === 'leftWall' ? new Vector(1, 0) :
+                                       new Vector(-1, 0);
+                        body.position = body.position.add(pushDir.mult(body.radius + 1));
                         body.wake();
                     }
                 }
@@ -420,20 +444,3 @@ class World {
         return this.collisionPairs;
     }
 }
-
-// 导出
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        Vector: Vector,
-        Circle: Circle,
-        Rectangle: Rectangle,
-        World: World
-    };
-} else if (typeof window !== 'undefined') {
-    window.Vector = Vector;
-    window.Circle = Circle;
-    window.Rectangle = Rectangle;
-    window.World = World;
-}
-
-})(); // 关闭 IIFE

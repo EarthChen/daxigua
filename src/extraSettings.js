@@ -101,9 +101,7 @@ class ToolSystem {
             }
         }
         return { ...TOOL_CONFIG.initialCount };
-    }
-
-    /**
+    }    /**
      * 保存道具数量到 localStorage
      */
     saveToolCount() {
@@ -201,9 +199,7 @@ class ToolSystem {
             if (!fruitNode || fruitNode.children.length === 0) {
                 this.showToast('没有可销毁的水果');
                 return;
-            }
-
-            // 如果已经在锤子模式，则取消
+            }            // 如果已经在锤子模式，则取消
             if (this.hammerMode) {
                 this.cancelHammer();
                 return;

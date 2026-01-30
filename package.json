@@ -1,13 +1,16 @@
 {
   "name": "daxigua",
-  "version": "1.0.0",
-  "description": "合成大西瓜 - 基于cocos2d-js的小游戏",
+  "version": "1.2.0",
+  "description": "合成大西瓜 - 增强版游戏",
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "serve -l 5000",
     "start": "serve -l 5000",
-    "preview": "serve -l 3000"
+    "preview": "serve -l 3000",
+    "sync:weapp": "cp shared/js/*.js wechat-minigame/js/",
+    "build:weapp": "pnpm sync:weapp && echo '小程序代码已同步'",
+    "upload:weapp": "pnpm sync:weapp && /Applications/wechatwebdevtools.app/Contents/MacOS/cli upload --project ./wechat-minigame --version $npm_package_version --desc \"v$npm_package_version 发布\""
   },
   "keywords": [
     "game",
