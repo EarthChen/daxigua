@@ -1559,6 +1559,8 @@ class Game {
         if (!__DEV__) return;
         this.showingDebugPanel = true;
         this.isPaused = true;
+        this.debugPanelOpenTime = Date.now();  // 防抖：记录打开时间
+        this.debugPanelHitAreas = [];  // 清空点击区域，等待下一帧渲染
     }
 
     hideDebugPanel() {
@@ -1567,6 +1569,11 @@ class Game {
     }
 
     handleDebugPanelClick(x, y) {
+        // 防抖：面板打开后 300ms 内的点击忽略
+        if (this.debugPanelOpenTime && Date.now() - this.debugPanelOpenTime < 300) {
+            return;
+        }
+        
         for (const area of this.debugPanelHitAreas) {
             if (this.isInRect(x, y, area)) {
                 if (area.action === 'close') {
