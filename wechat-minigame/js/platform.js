@@ -3,14 +3,17 @@
  * 用于处理微信小程序和 Web 环境的差异
  */
 
+(function() {
+'use strict';
+
 // 检测运行环境
-const isWechat = typeof wx !== 'undefined' && typeof wx.getSystemInfoSync === 'function';
-const isWeb = typeof window !== 'undefined' && typeof document !== 'undefined' && !isWechat;
+var isWechat = typeof wx !== 'undefined' && typeof wx.getSystemInfoSync === 'function';
+var isWeb = typeof window !== 'undefined' && typeof document !== 'undefined' && !isWechat;
 
 /**
  * 平台适配对象
  */
-const Platform = {
+var Platform = {
     isWechat,
     isWeb,
 
@@ -272,3 +275,5 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof window !== 'undefined') {
     window.Platform = Platform;
 }
+
+})(); // 关闭 IIFE

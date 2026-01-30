@@ -4,13 +4,16 @@
  * 支持微信小程序和 Web 环境
  */
 
+(function() {
+'use strict';
+
 // 环境适配导入
-let Platform, Vector, Circle, Rectangle, World, Renderer, SoundSystem, Config;
+var Platform, Vector, Circle, Rectangle, World, Renderer, SoundSystem, Config;
 
 if (typeof require !== 'undefined') {
     // Node.js / 小程序环境
     Platform = require('./platform');
-    const physics = require('./physics');
+    var physics = require('./physics');
     Vector = physics.Vector;
     Circle = physics.Circle;
     Rectangle = physics.Rectangle;
@@ -30,10 +33,21 @@ if (typeof require !== 'undefined') {
     Config = window.GameConfig;
 }
 
-const { 
-    FRUITS, PHYSICS, GAME_AREA, RULES, TOOLS, __DEV__, DEBUG_CONFIG,
-    COMBO, FEVER, WEATHER, EARTHQUAKE, MYSTERY_BOX, BOMB, ICE_BLOCK, BUFFS
-} = Config || {};
+var FRUITS = Config ? Config.FRUITS : [];
+var PHYSICS = Config ? Config.PHYSICS : {};
+var GAME_AREA = Config ? Config.GAME_AREA : {};
+var RULES = Config ? Config.RULES : {};
+var TOOLS = Config ? Config.TOOLS : {};
+var __DEV__ = Config ? Config.__DEV__ : false;
+var DEBUG_CONFIG = Config ? Config.DEBUG_CONFIG : {};
+var COMBO = Config ? Config.COMBO : {};
+var FEVER = Config ? Config.FEVER : {};
+var WEATHER = Config ? Config.WEATHER : {};
+var EARTHQUAKE = Config ? Config.EARTHQUAKE : {};
+var MYSTERY_BOX = Config ? Config.MYSTERY_BOX : {};
+var BOMB = Config ? Config.BOMB : {};
+var ICE_BLOCK = Config ? Config.ICE_BLOCK : {};
+var BUFFS = Config ? Config.BUFFS : {};
 
 class Game {
     constructor(config) {
@@ -78,8 +92,9 @@ class Game {
         this.canDrop = true;
         this.lastDropTime = 0;
 
-        // 自动下落倒计时（10秒）
-        this.autoDropCountdown = 10;
+        // 自动下落倒计时（15秒）
+        this.autoDropCountdown = 15;
+        this.autoDropDefaultTime = 15;  // 默认时间
         this.lastCountdownUpdate = Date.now();
         this.autoDropEnabled = true;
 
@@ -822,6 +837,14 @@ class Game {
 
     // 更新盲盒
     updateMysteryBoxes() {
+        // 获取碰撞对来检测盲盒是否与其他物体碰撞
+        const collisionPairs = this.world.getCollisionPairs();
+        const collidingBodies = new Set();
+        for (const pair of collisionPairs) {
+            collidingBodies.add(pair.bodyA.id);
+            collidingBodies.add(pair.bodyB.id);
+        }
+        
         for (const body of this.world.bodies) {
             if (!body.isMysteryBox) continue;
             if (body.mysteryState === 'resolved' || body.mysteryState === 'revealing') continue;
@@ -831,14 +854,15 @@ class Game {
                 body.groundedTimer = 0;
             }
             
-            // 检查是否落地（速度较慢且位置稳定）
+            // 检查是否落地（速度较慢、接近地面、或与其他物体碰撞）
             const isSlowEnough = body.velocity.lengthSq() < 4;
             const isNearGround = body.position.y > this.gameArea.groundY - body.radius * 3;
+            const isColliding = collidingBodies.has(body.id);
             
-            if (isSlowEnough || isNearGround) {
+            if (isSlowEnough || isNearGround || isColliding) {
                 body.groundedTimer++;
-                // 稳定 10 帧后判定为落地
-                if (body.groundedTimer > 10) {
+                // 稳定 5 帧后判定为落地（从 10 降低到 5，更快触发）
+                if (body.groundedTimer > 5) {
                     body.mysteryState = 'revealing';
                     
                     // 延迟后揭示内容
@@ -880,10 +904,19 @@ class Game {
 
     transformMysteryBox(body, newLevel) {
         const newFruit = FRUITS[newLevel];
+        
+        // 更新所有相关属性
         body.radius = newFruit.radius;
         body.fruitLevel = newLevel;
         body.isMysteryBox = false;
         body.mysteryState = 'resolved';
+        
+        // 更新质量（根据新半径）
+        body.mass = Math.PI * newFruit.radius * newFruit.radius * 0.01;
+        body.invMass = 1 / body.mass;
+        
+        // 清理盲盒相关属性
+        delete body.groundedTimer;
         
         // 播放转化特效
         this.mergeEffects.push({
@@ -894,6 +927,8 @@ class Game {
             startTime: Date.now(),
             duration: 400
         });
+        
+        console.log(`[盲盒] 转化为 ${newFruit.name} (等级 ${newLevel})`);
     }
 
     // 创建炸弹
@@ -1191,8 +1226,10 @@ class Game {
         // 恢复物理参数
         this.world.gravity = { x: PHYSICS.gravity.x, y: PHYSICS.gravity.y };
 
-        // 重置自动下落倒计时
-        this.resetAutoDropCountdown();
+        // 重置自动下落默认时间和倒计时
+        this.autoDropDefaultTime = 15;
+        this.autoDropCountdown = this.autoDropDefaultTime;
+        this.lastCountdownUpdate = Date.now();
 
         // 重新创建墙壁
         this.createWalls();
@@ -1545,10 +1582,134 @@ class Game {
                 } else if (area.action === 'addScore') {
                     this.score += 100;
                     this.showToast('🔧 分数 +100');
+                } else if (area.action === 'triggerFever') {
+                    this.activateFeverMode();
+                    this.showToast('🔥 已触发 Fever 模式');
+                } else if (area.action === 'triggerWeather') {
+                    this.startRandomWeather();
+                    this.showToast('🌤️ 已触发随机天气');
+                } else if (area.action === 'triggerEarthquake') {
+                    this.triggerEarthquake();
+                    this.showToast('⚠️ 已触发地震');
+                } else if (area.action === 'spawnMysteryBox') {
+                    this.debugSpawnMysteryBox();
+                } else if (area.action === 'spawnBomb') {
+                    this.debugSpawnBomb();
+                } else if (area.action === 'spawnIceFruit') {
+                    this.debugSpawnIceFruit();
+                } else if (area.action === 'toggleWeather') {
+                    WEATHER.enabled = !WEATHER.enabled;
+                    this.showToast(`🌤️ 天气系统: ${WEATHER.enabled ? '开启' : '关闭'}`);
+                } else if (area.action === 'toggleEarthquake') {
+                    EARTHQUAKE.enabled = !EARTHQUAKE.enabled;
+                    this.showToast(`⚠️ 地震系统: ${EARTHQUAKE.enabled ? '开启' : '关闭'}`);
+                } else if (area.action === 'toggleMysteryBox') {
+                    MYSTERY_BOX.enabled = !MYSTERY_BOX.enabled;
+                    this.showToast(`🎁 盲盒系统: ${MYSTERY_BOX.enabled ? '开启' : '关闭'}`);
+                } else if (area.action === 'toggleIceBlock') {
+                    ICE_BLOCK.enabled = !ICE_BLOCK.enabled;
+                    this.showToast(`🧊 冰封系统: ${ICE_BLOCK.enabled ? '开启' : '关闭'}`);
+                } else if (area.action === 'clearAllFruits') {
+                    this.debugClearAllFruits();
+                } else if (area.action === 'addCombo') {
+                    this.comboCount = Math.min(this.comboCount + 5, COMBO.maxCombo);
+                    this.lastMergeTime = Date.now();
+                    this.showToast(`🔥 Combo +5 (当前: ${this.comboCount})`);
+                } else if (area.action === 'spawnFruit') {
+                    this.debugSpawnRandomFruit();
                 }
                 return;
             }
         }
+    }
+    
+    // ==================== 调试辅助方法 ====================
+    
+    debugSpawnMysteryBox() {
+        const x = this.gameArea.left + (this.gameArea.right - this.gameArea.left) / 2;
+        const y = this.gameArea.gameOverLineY + 50;
+        const level = Math.floor(Math.random() * 5);
+        const fruit = FRUITS[level];
+        
+        const body = new Circle(x, y, fruit.radius, {
+            restitution: PHYSICS.restitution,
+            friction: PHYSICS.friction,
+            frictionAir: PHYSICS.frictionAir,
+            label: 'fruit',
+            fruitLevel: level
+        });
+        body.isMysteryBox = true;
+        body.mysteryState = 'falling';
+        
+        this.world.add(body);
+        this.showToast('🎁 已生成盲盒');
+    }
+    
+    debugSpawnBomb() {
+        const x = this.gameArea.left + (this.gameArea.right - this.gameArea.left) / 2;
+        const y = this.gameArea.gameOverLineY + 50;
+        this.createBomb(x, y);
+        this.showToast('💣 已生成炸弹');
+    }
+    
+    debugSpawnIceFruit() {
+        const x = this.gameArea.left + (this.gameArea.right - this.gameArea.left) / 2;
+        const y = this.gameArea.gameOverLineY + 50;
+        const level = Math.floor(Math.random() * 5);
+        const fruit = FRUITS[level];
+        
+        const body = new Circle(x, y, fruit.radius, {
+            restitution: PHYSICS.restitution,
+            friction: PHYSICS.friction,
+            frictionAir: PHYSICS.frictionAir,
+            label: 'fruit',
+            fruitLevel: level
+        });
+        body.iceState = 'frozen';
+        
+        this.world.add(body);
+        this.showToast('🧊 已生成冰封水果');
+    }
+    
+    debugSpawnRandomFruit() {
+        const x = this.gameArea.left + (this.gameArea.right - this.gameArea.left) / 2;
+        const y = this.gameArea.gameOverLineY + 50;
+        const level = Math.floor(Math.random() * 11);  // 0-10
+        const fruit = FRUITS[level];
+        
+        const body = new Circle(x, y, fruit.radius, {
+            restitution: PHYSICS.restitution,
+            friction: PHYSICS.friction,
+            frictionAir: PHYSICS.frictionAir,
+            label: 'fruit',
+            fruitLevel: level
+        });
+        
+        this.world.add(body);
+        this.showToast(`🍇 已生成 ${fruit.name}`);
+    }
+    
+    debugClearAllFruits() {
+        const fruits = this.world.bodies.filter(b => b.label === 'fruit');
+        for (const fruit of fruits) {
+            this.world.remove(fruit);
+        }
+        this.showToast(`🗑️ 已清空 ${fruits.length} 个水果`);
+    }
+    
+    // 获取调试状态信息
+    getDebugState() {
+        return {
+            weatherEnabled: WEATHER.enabled,
+            earthquakeEnabled: EARTHQUAKE.enabled,
+            mysteryBoxEnabled: MYSTERY_BOX.enabled,
+            iceBlockEnabled: ICE_BLOCK.enabled,
+            currentWeather: this.currentWeather,
+            isFeverMode: this.isFeverMode,
+            comboCount: this.comboCount,
+            fruitCount: this.world.bodies.filter(b => b.label === 'fruit').length,
+            autoDropTime: this.autoDropDefaultTime
+        };
     }
 
     uploadScore() {
@@ -1637,9 +1798,12 @@ class Game {
         }
     }
 
-    // 重置自动下落倒计时
+    // 重置自动下落倒计时（根据 combo 调整）
     resetAutoDropCountdown() {
-        this.autoDropCountdown = 10;
+        // 基础时间 15 秒，combo 时略微缩短，最低 10 秒
+        // 每次 combo 减少 0.5 秒，最多减少 5 秒
+        const comboReduction = Math.min(this.comboCount * 0.5, 5);
+        this.autoDropCountdown = Math.max(this.autoDropDefaultTime - comboReduction, 10);
         this.lastCountdownUpdate = Date.now();
     }
 
@@ -1728,7 +1892,8 @@ class Game {
                     this.dropX,
                     pendingY,
                     this.autoDropCountdown,
-                    this.currentFruitLevel
+                    this.currentFruitLevel,
+                    this.autoDropDefaultTime
                 );
             }
         }
@@ -1817,7 +1982,7 @@ class Game {
 
         // 绘制调试面板（仅开发环境）
         if (__DEV__ && this.showingDebugPanel) {
-            this.debugPanelHitAreas = renderer.drawDebugPanel();
+            this.debugPanelHitAreas = renderer.drawDebugPanel(this.getDebugState());
         }
 
         // 绘制调试按钮（仅开发环境）
@@ -1922,3 +2087,5 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof window !== 'undefined') {
     window.Game = Game;
 }
+
+})(); // 关闭 IIFE

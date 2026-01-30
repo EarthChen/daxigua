@@ -4,8 +4,11 @@
  * 支持微信小程序和 Web 环境
  */
 
+(function() {
+'use strict';
+
 // 环境适配导入
-let Platform;
+var Platform;
 if (typeof require !== 'undefined') {
     Platform = require('./platform');
 } else {
@@ -195,3 +198,5 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof window !== 'undefined') {
     window.SoundSystem = SoundSystem;
 }
+
+})(); // 关闭 IIFE

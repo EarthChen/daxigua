@@ -3,7 +3,31 @@
  * 实现圆形刚体、重力、碰撞检测和响应
  */
 
-const { PHYSICS } = require('./config');
+(function() {
+'use strict';
+
+// 环境适配导入
+var PHYSICS;
+if (typeof require !== 'undefined' && typeof module !== 'undefined') {
+    // Node.js / 小程序环境
+    PHYSICS = require('./config').PHYSICS;
+} else if (typeof window !== 'undefined' && window.GameConfig) {
+    // Web 浏览器环境
+    PHYSICS = window.GameConfig.PHYSICS;
+} else {
+    // 默认物理参数
+    PHYSICS = {
+        gravity: { x: 0, y: 1.2 },
+        friction: 0.3,
+        frictionStatic: 0.6,
+        restitution: 0.05,
+        frictionAir: 0.02,
+        sleepThreshold: 30,
+        sleepVelocityLimit: 0.5,
+        positionIterations: 4,
+        velocityDamping: 0.98
+    };
+}
 
 /**
  * 2D 向量类
@@ -400,10 +424,10 @@ class World {
 // 导出
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        Vector,
-        Circle,
-        Rectangle,
-        World
+        Vector: Vector,
+        Circle: Circle,
+        Rectangle: Rectangle,
+        World: World
     };
 } else if (typeof window !== 'undefined') {
     window.Vector = Vector;
@@ -411,3 +435,5 @@ if (typeof module !== 'undefined' && module.exports) {
     window.Rectangle = Rectangle;
     window.World = World;
 }
+
+})(); // 关闭 IIFE

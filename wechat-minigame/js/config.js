@@ -2,11 +2,15 @@
  * 游戏配置常量
  */
 
+// 使用 IIFE 避免全局变量冲突
+(function() {
+'use strict';
+
 // 开发环境标识 - 发布前设为 false
-const __DEV__ = true;
+var __DEV__ = true;
 
 // 水果配置（11种水果）
-const FRUITS = [
+var FRUITS = [
     { id: 0, name: '葡萄', radius: 26, color: '#9b59b6', score: 1 },
     { id: 1, name: '樱桃', radius: 33, color: '#e74c3c', score: 2 },
     { id: 2, name: '橘子', radius: 40, color: '#e67e22', score: 3 },
@@ -21,7 +25,7 @@ const FRUITS = [
 ];
 
 // 物理引擎配置
-const PHYSICS = {
+var PHYSICS = {
     gravity: { x: 0, y: 1.2 },           // 重力（降低）
     friction: 0.3,                        // 摩擦力（增加）
     frictionStatic: 0.6,                  // 静摩擦力
@@ -34,7 +38,7 @@ const PHYSICS = {
 };
 
 // 游戏区域配置
-const GAME_AREA = {
+var GAME_AREA = {
     // 相对于设计尺寸的比例
     topMargin: 0.15,      // 顶部边距（生成区域）
     bottomMargin: 0.12,   // 底部边距（地面）
@@ -44,7 +48,7 @@ const GAME_AREA = {
 };
 
 // 游戏规则配置
-const RULES = {
+var RULES = {
     maxFruitLevel: 4,        // 随机生成的最大水果等级（0-4）
     mergeDelay: 100,         // 合成延迟（毫秒）
     gameOverLineY: 0.18,     // 游戏结束线位置（相对高度）
@@ -53,33 +57,33 @@ const RULES = {
 };
 
 // 道具配置
-const TOOLS = {
+var TOOLS = {
     hammer: { initial: 3, adReward: 1, name: '锤子', icon: '🔨' },
     selectFruit: { initial: 2, adReward: 1, name: '选果', icon: '🍇' },
     skip: { initial: 5, adReward: 2, name: '跳过', icon: '⏭️' }
 };
 
 // 广告配置
-const AD_CONFIG = {
+var AD_CONFIG = {
     rewardedVideoAdUnitId: 'adunit-xxxxxxxxxx',  // 替换为实际广告位ID
     cooldown: 30000  // 广告冷却时间
 };
 
 // 分享配置
-const SHARE_CONFIG = {
+var SHARE_CONFIG = {
     cooldown: 5 * 60 * 1000,  // 分享冷却时间（5分钟）
     reward: 1  // 分享奖励数量
 };
 
 // 调试配置 - 仅开发环境生效
-const DEBUG_CONFIG = {
+var DEBUG_CONFIG = {
     enabled: __DEV__,  // 通过编译时变量控制
     showDebugPanel: true,  // 显示调试面板
     addToolsAmount: 5  // 每次添加道具数量
 };
 
 // Combo 连击配置
-const COMBO = {
+var COMBO = {
     windowMs: 1500,           // Combo 有效窗口时间（毫秒）
     scoreMultiplier: 0.5,     // 每次连击增加的分数倍率
     maxCombo: 20,             // 最大连击数上限
@@ -88,7 +92,7 @@ const COMBO = {
 };
 
 // Fever 狂热模式配置
-const FEVER = {
+var FEVER = {
     duration: 6000,           // 持续时间（毫秒）
     radiusShrink: 0.85,       // 碰撞体缩小比例
     dropCooldown: 0,          // 投放冷却时间
@@ -97,7 +101,7 @@ const FEVER = {
 };
 
 // 天气系统配置
-const WEATHER = {
+var WEATHER = {
     enabled: true,            // 是否启用天气系统
     interval: 30000,          // 天气切换间隔（毫秒）- 30秒
     duration: 15000,          // 单次天气持续时间
@@ -126,7 +130,7 @@ const WEATHER = {
 };
 
 // 地震配置
-const EARTHQUAKE = {
+var EARTHQUAKE = {
     enabled: true,            // 是否启用地震系统
     triggerDelay: 1500,       // 超线后触发延迟（毫秒）- 1.5秒
     impulseStrength: 10,      // 向上冲量强度
@@ -138,7 +142,7 @@ const EARTHQUAKE = {
 };
 
 // 盲盒果实配置
-const MYSTERY_BOX = {
+var MYSTERY_BOX = {
     enabled: true,            // 是否启用盲盒
     spawnChance: 0.05,        // 每次生成水果时的出现概率
     results: {
@@ -150,7 +154,7 @@ const MYSTERY_BOX = {
 };
 
 // 炸弹配置
-const BOMB = {
+var BOMB = {
     fuseTime: 3000,           // 引爆时间
     blastRadius: 120,         // 爆炸半径
     blastForce: 15,           // 爆炸冲量
@@ -160,7 +164,7 @@ const BOMB = {
 };
 
 // 冰封果实配置
-const ICE_BLOCK = {
+var ICE_BLOCK = {
     enabled: true,            // 是否启用冰封
     spawnChance: 0.08,        // 出现概率
     thawRadius: 80,           // 解冻触发半径
@@ -168,7 +172,7 @@ const ICE_BLOCK = {
 };
 
 // Buff 系统配置
-const BUFFS = {
+var BUFFS = {
     expand: {
         id: 'expand',
         name: '扩容',
@@ -198,7 +202,7 @@ const BUFFS = {
 };
 
 // UI 颜色配置
-const COLORS = {
+var COLORS = {
     background: '#f5deb3',      // 背景色
     ground: '#8b4513',          // 地面色
     groundTop: '#654321',       // 地面顶部色
@@ -211,25 +215,25 @@ const COLORS = {
     adButtonBg: '#4CAF50'       // 广告按钮背景
 };
 
-const GameConfig = {
-    __DEV__,
-    FRUITS,
-    PHYSICS,
-    GAME_AREA,
-    RULES,
-    TOOLS,
-    AD_CONFIG,
-    SHARE_CONFIG,
-    DEBUG_CONFIG,
-    COLORS,
-    COMBO,
-    FEVER,
-    WEATHER,
-    EARTHQUAKE,
-    MYSTERY_BOX,
-    BOMB,
-    ICE_BLOCK,
-    BUFFS
+var GameConfig = {
+    __DEV__: __DEV__,
+    FRUITS: FRUITS,
+    PHYSICS: PHYSICS,
+    GAME_AREA: GAME_AREA,
+    RULES: RULES,
+    TOOLS: TOOLS,
+    AD_CONFIG: AD_CONFIG,
+    SHARE_CONFIG: SHARE_CONFIG,
+    DEBUG_CONFIG: DEBUG_CONFIG,
+    COLORS: COLORS,
+    COMBO: COMBO,
+    FEVER: FEVER,
+    WEATHER: WEATHER,
+    EARTHQUAKE: EARTHQUAKE,
+    MYSTERY_BOX: MYSTERY_BOX,
+    BOMB: BOMB,
+    ICE_BLOCK: ICE_BLOCK,
+    BUFFS: BUFFS
 };
 
 // 导出
@@ -238,3 +242,5 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof window !== 'undefined') {
     window.GameConfig = GameConfig;
 }
+
+})(); // 关闭 IIFE
