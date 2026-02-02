@@ -458,9 +458,6 @@ class Game {
 
         this.world.add(body);
         
-        // 播放投放音效
-        this.playSound('drop');
-        
         // 更新状态
         this.canDrop = false;
         this.lastDropTime = now;
@@ -874,21 +871,22 @@ class Game {
     }
 
     /**
-     * 设置反重力效果
+     * 设置反重力效果（温和版本）
      */
     setAntiGravity(multiplier) {
         // 保存原始重力
         this._savedPhysics.gravityY = this.world.gravity.y;
         
-        // 设置反重力（向上的微弱力）
-        this.world.gravity.y = Math.abs(this._savedPhysics.gravityY) * multiplier;
+        // 设置反重力为很小的向上力（-0.1 ~ -0.15）
+        // 让水果轻微漂浮而不是飞走
+        this.world.gravity.y = Math.abs(this._savedPhysics.gravityY) * multiplier * 0.5;
         
-        // 唤醒所有水果
+        // 唤醒所有水果，但不给推力
         for (const body of this.world.bodies) {
             if (body.label === 'fruit' && !body.isStatic) {
                 body.wake();
-                // 给予一个初始向上的小推力
-                body.velocity = body.velocity.add(new Vector(0, -2));
+                // 减缓当前速度，让效果更可控
+                body.velocity = body.velocity.mult(0.3);
             }
         }
     }
@@ -930,13 +928,20 @@ class Game {
     }
 
     endWeather() {
+        const wasAntiGravity = this.currentWeather === 'antiGravity';
+        
         // 恢复原始物理参数
         this.setWeatherFriction(this._savedPhysics.friction);
         this.setWeatherRestitution(this._savedPhysics.restitution);
         
         // 恢复重力
         if (this._savedPhysics.gravityY !== undefined) {
-            this.world.gravity.y = this._savedPhysics.gravityY;
+            if (wasAntiGravity) {
+                // 反重力结束：渐进恢复重力 + 保护期
+                this.startGravityRecovery(this._savedPhysics.gravityY);
+            } else {
+                this.world.gravity.y = this._savedPhysics.gravityY;
+            }
             
             // 唤醒所有物体，防止悬停
             for (const body of this.world.bodies) {
@@ -950,6 +955,35 @@ class Game {
         
         this.currentWeather = null;
         this.showToast('天气恢复正常');
+    }
+
+    /**
+     * 渐进恢复重力（反重力结束后）
+     * 同时启用临时保护期，防止水果落下时触发 gameOver
+     */
+    startGravityRecovery(targetGravity) {
+        const duration = 1500; // 1.5 秒渐进恢复
+        const startGravity = this.world.gravity.y;
+        const startTime = Date.now();
+        
+        // 启用保护期
+        this.antiGravityProtection = true;
+        this.antiGravityProtectionEndTime = Date.now() + duration + 1000; // 额外 1 秒缓冲
+        
+        const recover = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            // 使用缓动函数让恢复更平滑
+            const eased = 1 - Math.pow(1 - progress, 3);
+            this.world.gravity.y = startGravity + (targetGravity - startGravity) * eased;
+            
+            if (progress < 1) {
+                requestAnimationFrame(recover);
+            }
+        };
+        
+        recover();
     }
 
     // ==================== 地震系统方法 ====================
@@ -1607,7 +1641,6 @@ class Game {
         
         // 触发震动效果
         this.startMergeShake(15, 400);
-        this.playSound('drop');
         this.showToast(`🔀 洗牌完成！`);
     }
 
@@ -1657,6 +1690,22 @@ class Game {
     }
 
     checkGameOver() {
+        // 反重力保护期：跳过游戏结束检测
+        if (this.antiGravityProtection) {
+            if (Date.now() < this.antiGravityProtectionEndTime) {
+                return; // 保护期内不检测
+            } else {
+                // 保护期结束
+                this.antiGravityProtection = false;
+                this.antiGravityProtectionEndTime = null;
+            }
+        }
+        
+        // 反重力天气期间不检测 gameOver
+        if (this.currentWeather === 'antiGravity') {
+            return;
+        }
+        
         const gameOverY = this.gameArea.gameOverLineY;
 
         for (const body of this.world.bodies) {
@@ -1740,6 +1789,10 @@ class Game {
         this.explosionEffects = [];
         this.iceThawEffects = [];
         this.gravityFields = [];
+        
+        // 重置反重力保护期
+        this.antiGravityProtection = false;
+        this.antiGravityProtectionEndTime = null;
 
         // 重置合成反馈
         this.mergeShake = null;
