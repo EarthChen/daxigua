@@ -266,6 +266,77 @@ var Platform = {
                 canvas: null
             };
         }
+    },
+
+    // ==================== 统计数据存储 ====================
+    
+    /**
+     * 保存统计数据
+     * @param {string} key - 统计项键名
+     * @param {*} value - 统计值
+     */
+    saveStat(key, value) {
+        const statsKey = 'daxigua_stats';
+        try {
+            const stats = this.getStorageSync(statsKey) || {};
+            stats[key] = value;
+            this.setStorageSync(statsKey, stats);
+        } catch (e) {
+            console.error('[Platform] 保存统计失败:', e);
+        }
+    },
+
+    /**
+     * 获取统计数据
+     * @param {string} key - 统计项键名
+     * @param {*} defaultValue - 默认值
+     * @returns {*} 统计值
+     */
+    getStat(key, defaultValue = 0) {
+        const statsKey = 'daxigua_stats';
+        try {
+            const stats = this.getStorageSync(statsKey) || {};
+            return stats[key] !== undefined ? stats[key] : defaultValue;
+        } catch (e) {
+            console.error('[Platform] 获取统计失败:', e);
+            return defaultValue;
+        }
+    },
+
+    /**
+     * 获取所有统计数据
+     * @returns {Object} 所有统计
+     */
+    getAllStats() {
+        const statsKey = 'daxigua_stats';
+        try {
+            return this.getStorageSync(statsKey) || {};
+        } catch (e) {
+            console.error('[Platform] 获取统计失败:', e);
+            return {};
+        }
+    },
+
+    /**
+     * 增量更新统计数据
+     * @param {string} key - 统计项键名
+     * @param {number} increment - 增量（默认1）
+     */
+    incrementStat(key, increment = 1) {
+        const current = this.getStat(key, 0);
+        this.saveStat(key, current + increment);
+    },
+
+    /**
+     * 更新最大值统计
+     * @param {string} key - 统计项键名
+     * @param {number} value - 新值
+     */
+    updateMaxStat(key, value) {
+        const current = this.getStat(key, 0);
+        if (value > current) {
+            this.saveStat(key, value);
+        }
     }
 };
 

@@ -48,6 +48,11 @@ var MYSTERY_BOX = Config ? Config.MYSTERY_BOX : {};
 var BOMB = Config ? Config.BOMB : {};
 var ICE_BLOCK = Config ? Config.ICE_BLOCK : {};
 var BUFFS = Config ? Config.BUFFS : {};
+var MERGE_FEEDBACK = Config ? Config.MERGE_FEEDBACK : {};
+var STATS = Config ? Config.STATS : {};
+var ACHIEVEMENTS = Config ? Config.ACHIEVEMENTS : [];
+var SKINS = Config ? Config.SKINS : {};
+var GRAVITY_FIELD = Config ? Config.GRAVITY_FIELD : {};
 
 class Game {
     constructor(config) {
@@ -155,6 +160,12 @@ class Game {
         // ==================== 特殊实体 ====================
         this.explosionEffects = [];       // 爆炸特效
         this.iceThawEffects = [];         // 冰块解冻特效
+        this.gravityFields = [];          // 引力场列表
+
+        // ==================== 合成反馈系统 ====================
+        this.mergeShake = null;           // 合成震动
+        this.comboHueShift = 0;           // Combo 色调偏移
+        this.comboSaturation = 1;         // Combo 饱和度
 
         // ==================== Buff 系统 ====================
         this.activeBuffs = {};            // 已激活的 Buff
@@ -163,6 +174,16 @@ class Game {
         this.showingBuffPanel = false;    // 是否显示 Buff 选择面板
         this.buffChoices = [];            // 当前可选的 Buff
         this.buffPanelHitAreas = [];      // Buff 面板点击区域
+        this.piercingCharges = 0;         // 穿透弹剩余次数
+
+        // ==================== 统计与成就系统 ====================
+        this.gameStartTime = 0;           // 游戏开始时间
+        this.sessionMerges = 0;           // 本局合成次数
+        this.sessionWatermelons = 0;      // 本局西瓜数
+        this.unlockedAchievements = this.loadUnlockedAchievements();
+        this.newAchievements = [];        // 新解锁的成就（用于显示）
+        this.showingStatsPanel = false;   // 是否显示统计面板
+        this.statsPanelHitAreas = [];     // 统计面板点击区域
 
         // 初始化
         this.init();
@@ -400,14 +421,14 @@ class Game {
         // 计算半径（Fever 模式下缩小）
         const radius = this.isFeverMode ? fruit.radius * FEVER.radiusShrink : fruit.radius;
 
-        // 创建水果刚体
+        // 创建水果刚体（使用差异化物理材质）
         const body = new Circle(
             this.dropX,
             this.gameArea.gameOverLineY - radius - 10,
             radius,
             {
-                restitution: PHYSICS.restitution,
-                friction: PHYSICS.friction,
+                restitution: fruit.restitution !== undefined ? fruit.restitution : PHYSICS.restitution,
+                friction: fruit.friction !== undefined ? fruit.friction : PHYSICS.friction,
                 frictionAir: PHYSICS.frictionAir,
                 label: 'fruit',
                 fruitLevel: this.currentFruitLevel
@@ -425,6 +446,14 @@ class Game {
         // Fever 模式下保存原始半径
         if (this.isFeverMode) {
             body._originalRadius = fruit.radius;
+        }
+
+        // 穿透弹模式
+        if (this.piercingCharges > 0) {
+            body.isPiercing = true;
+            body.hasPierced = false;
+            this.piercingCharges--;
+            this.showToast(`🎯 穿透弹发射！剩余: ${this.piercingCharges}`);
         }
 
         this.world.add(body);
@@ -449,6 +478,7 @@ class Game {
     handleCollisions() {
         const pairs = this.world.getCollisionPairs();
         const toMerge = [];
+        const toPierce = [];
 
         for (const pair of pairs) {
             const { bodyA, bodyB } = pair;
@@ -456,6 +486,17 @@ class Game {
             // 检查是否是两个水果碰撞
             if (bodyA.label !== 'fruit' || bodyB.label !== 'fruit') continue;
             if (bodyA.isRemoved || bodyB.isRemoved) continue;
+            
+            // 处理穿透弹
+            if (bodyA.isPiercing && !bodyA.hasPierced && !bodyB.justCreated) {
+                toPierce.push({ piercer: bodyA, target: bodyB });
+                continue;
+            }
+            if (bodyB.isPiercing && !bodyB.hasPierced && !bodyA.justCreated) {
+                toPierce.push({ piercer: bodyB, target: bodyA });
+                continue;
+            }
+            
             if (bodyA.justCreated || bodyB.justCreated) continue;
             
             // 跳过冰封水果
@@ -470,11 +511,48 @@ class Game {
             }
         }
 
+        // 处理穿透
+        for (const { piercer, target } of toPierce) {
+            if (piercer.isRemoved || target.isRemoved) continue;
+            if (piercer.hasPierced) continue;
+            this.handlePiercing(piercer, target);
+        }
+
         // 处理合成
         for (const { bodyA, bodyB } of toMerge) {
             if (bodyA.isRemoved || bodyB.isRemoved) continue;
             this.mergeFruits(bodyA, bodyB);
         }
+    }
+
+    /**
+     * 处理穿透弹效果
+     */
+    handlePiercing(piercer, target) {
+        piercer.hasPierced = true;
+        piercer.isPiercing = false;
+        
+        const targetName = FRUITS[target.fruitLevel]?.name || '水果';
+        
+        // 添加穿透特效
+        this.mergeEffects.push({
+            x: target.position.x,
+            y: target.position.y,
+            radius: target.radius,
+            type: 'pierce',
+            startTime: Date.now(),
+            duration: 300
+        });
+        
+        // 销毁目标
+        this.world.remove(target);
+        
+        // 加分
+        const bonus = FRUITS[target.fruitLevel]?.score || 1;
+        this.score += bonus * 2;
+        
+        this.showToast(`🎯 穿透销毁 ${targetName}！+${bonus * 2}`);
+        this.playSound('destroy');
     }
 
     mergeFruits(bodyA, bodyB) {
@@ -491,7 +569,7 @@ class Game {
         this.world.remove(bodyA);
         this.world.remove(bodyB);
 
-        // 创建新水果
+        // 创建新水果（使用差异化物理材质）
         const newFruit = FRUITS[newLevel];
         // Fever 模式下碰撞体缩小
         const radius = this.isFeverMode ? newFruit.radius * FEVER.radiusShrink : newFruit.radius;
@@ -499,8 +577,8 @@ class Game {
             newX, newY,
             radius,
             {
-                restitution: PHYSICS.restitution,
-                friction: PHYSICS.friction,
+                restitution: newFruit.restitution !== undefined ? newFruit.restitution : PHYSICS.restitution,
+                friction: newFruit.friction !== undefined ? newFruit.friction : PHYSICS.friction,
                 frictionAir: PHYSICS.frictionAir,
                 label: 'fruit',
                 fruitLevel: newLevel
@@ -523,6 +601,10 @@ class Game {
         const finalScore = this.calculateMergeScore(baseScore);
         this.score += finalScore;
 
+        // 记录统计
+        this.recordMergeStat(newLevel);
+        this.recordComboStat(comboCount);
+
         // 添加合成特效
         this.mergeEffects.push({
             x: newX,
@@ -542,6 +624,9 @@ class Game {
                 duration: 800
             });
         }
+
+        // 触发合成震感反馈
+        this.triggerMergeShake(newLevel, comboCount);
 
         // 播放音效（带 Pitch 变化）
         this.playMergeSound(comboCount);
@@ -587,6 +672,105 @@ class Game {
         if (this.sound) {
             this.sound.playMerge(comboCount);
         }
+    }
+
+    /**
+     * 触发合成震感反馈
+     * @param {number} fruitLevel - 合成后的水果等级
+     * @param {number} comboCount - 当前连击数
+     */
+    triggerMergeShake(fruitLevel, comboCount) {
+        if (!MERGE_FEEDBACK.enabled) return;
+        
+        // 计算震动强度
+        let intensity = MERGE_FEEDBACK.baseIntensity + fruitLevel * MERGE_FEEDBACK.levelMultiplier;
+        let duration = MERGE_FEEDBACK.baseDuration + fruitLevel * MERGE_FEEDBACK.durationMultiplier;
+        
+        // 高等级合成额外加成
+        if (fruitLevel >= MERGE_FEEDBACK.highLevelThreshold) {
+            intensity += MERGE_FEEDBACK.highLevelIntensityBonus;
+            duration += 100;
+        }
+        
+        // Combo 加成
+        if (comboCount > 1) {
+            intensity *= (1 + comboCount * 0.1);
+            duration += comboCount * 20;
+        }
+        
+        // 西瓜特效
+        if (fruitLevel === 10) {
+            intensity = Math.max(intensity, 20);
+            duration = Math.max(duration, 500);
+        }
+        
+        // 触发震动
+        this.startMergeShake(intensity, duration);
+        
+        // 更新 Combo 色调偏移
+        this.updateComboHueShift(comboCount);
+    }
+
+    /**
+     * 启动合成震动效果
+     */
+    startMergeShake(intensity, duration) {
+        // 如果已有地震震动，取更大值
+        if (this.screenShake) {
+            intensity = Math.max(intensity, this.screenShake.intensity);
+            duration = Math.max(duration, this.screenShake.duration - (Date.now() - this.screenShake.startTime));
+        }
+        
+        this.mergeShake = {
+            startTime: Date.now(),
+            duration: duration,
+            intensity: intensity
+        };
+    }
+
+    /**
+     * 获取合成震动偏移
+     */
+    getMergeShakeOffset() {
+        if (!this.mergeShake) return { x: 0, y: 0 };
+        
+        const elapsed = Date.now() - this.mergeShake.startTime;
+        if (elapsed > this.mergeShake.duration) {
+            this.mergeShake = null;
+            return { x: 0, y: 0 };
+        }
+        
+        const progress = elapsed / this.mergeShake.duration;
+        const decay = 1 - progress;
+        const intensity = this.mergeShake.intensity * decay;
+        
+        // 使用正弦波产生更自然的震动
+        const frequency = 20; // 震动频率
+        return {
+            x: Math.sin(elapsed / 1000 * Math.PI * frequency) * intensity,
+            y: Math.cos(elapsed / 1000 * Math.PI * frequency * 1.3) * intensity * 0.8
+        };
+    }
+
+    /**
+     * 更新 Combo 色调偏移
+     */
+    updateComboHueShift(comboCount) {
+        if (!MERGE_FEEDBACK.comboHueShift || !MERGE_FEEDBACK.comboHueShift.enabled) return;
+        
+        const config = MERGE_FEEDBACK.comboHueShift;
+        
+        // 计算色调偏移
+        this.comboHueShift = Math.min(
+            config.baseShift + comboCount * config.shiftPerCombo,
+            config.maxShift
+        );
+        
+        // 计算饱和度增益
+        this.comboSaturation = Math.min(
+            1 + comboCount * config.saturationBoost,
+            config.maxSaturation
+        );
     }
 
     // ==================== Fever 模式方法 ====================
@@ -661,25 +845,52 @@ class Game {
         const types = Object.keys(WEATHER.types);
         const weatherType = this.weightedRandomWeather(types);
         this.currentWeather = weatherType;
-        this.weatherEndTime = Date.now() + WEATHER.duration;
+        
+        // 反重力天气使用特殊时长
+        const config = WEATHER.types[weatherType];
+        const duration = config.duration || WEATHER.duration;
+        this.weatherEndTime = Date.now() + duration;
         this.nextWeatherTime = this.weatherEndTime + WEATHER.interval;
         
         // 保存原始物理参数
         this._savedPhysics = {
             friction: PHYSICS.friction,
-            restitution: PHYSICS.restitution
+            restitution: PHYSICS.restitution,
+            gravityY: this.world.gravity.y
         };
         
         // 应用天气效果
-        const config = WEATHER.types[weatherType];
         if (config.friction !== undefined) {
             this.setWeatherFriction(config.friction);
         }
         if (config.restitution !== undefined) {
             this.setWeatherRestitution(config.restitution);
         }
+        if (config.gravityMultiplier !== undefined) {
+            this.setAntiGravity(config.gravityMultiplier);
+        }
         
         this.showToast(`${config.icon} ${config.name}来袭！`);
+    }
+
+    /**
+     * 设置反重力效果
+     */
+    setAntiGravity(multiplier) {
+        // 保存原始重力
+        this._savedPhysics.gravityY = this.world.gravity.y;
+        
+        // 设置反重力（向上的微弱力）
+        this.world.gravity.y = Math.abs(this._savedPhysics.gravityY) * multiplier;
+        
+        // 唤醒所有水果
+        for (const body of this.world.bodies) {
+            if (body.label === 'fruit' && !body.isStatic) {
+                body.wake();
+                // 给予一个初始向上的小推力
+                body.velocity = body.velocity.add(new Vector(0, -2));
+            }
+        }
     }
 
     weightedRandomWeather(types) {
@@ -722,6 +933,21 @@ class Game {
         // 恢复原始物理参数
         this.setWeatherFriction(this._savedPhysics.friction);
         this.setWeatherRestitution(this._savedPhysics.restitution);
+        
+        // 恢复重力
+        if (this._savedPhysics.gravityY !== undefined) {
+            this.world.gravity.y = this._savedPhysics.gravityY;
+            
+            // 唤醒所有物体，防止悬停
+            for (const body of this.world.bodies) {
+                if (body.label === 'fruit' && !body.isStatic) {
+                    body.wake();
+                    body.isSleeping = false;
+                    body.sleepCounter = 0;
+                }
+            }
+        }
+        
         this.currentWeather = null;
         this.showToast('天气恢复正常');
     }
@@ -884,6 +1110,14 @@ class Game {
         
         const roll = Math.random();
         
+        // 检查是否生成引力场（最低概率，2%）
+        if (GRAVITY_FIELD.enabled && roll < GRAVITY_FIELD.spawnChance) {
+            this.createGravityField(body.position.x, body.position.y);
+            this.world.remove(body);
+            this.showToast('🌀 引力场！');
+            return;
+        }
+        
         if (roll < MYSTERY_BOX.results.evolve.chance) {
             // 进化为高级水果
             const newLevel = Math.min((body.fruitLevel || 0) + MYSTERY_BOX.results.evolve.levelBonus, 10);
@@ -958,25 +1192,47 @@ class Game {
 
     explodeBomb(bomb) {
         bomb.exploded = true;
-        const center = bomb.position;
+        const center = { x: bomb.position.x, y: bomb.position.y };
         let destroyedCount = 0;
+        const chainBombs = [];  // 需要连锁引爆的炸弹
         
+        // 遍历所有物体
         for (const body of this.world.bodies) {
-            if (body === bomb || body.label !== 'fruit') continue;
+            if (body === bomb) continue;
             
             const dx = body.position.x - center.x;
             const dy = body.position.y - center.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
+            // 处理其他炸弹的连锁反应
+            if (body.isBomb && !body.exploded && BOMB.chainReaction) {
+                if (dist < BOMB.blastRadius) {
+                    chainBombs.push(body);
+                }
+                continue;
+            }
+            
+            // 只处理水果
+            if (body.label !== 'fruit') continue;
+            
             if (dist < BOMB.destroyRadius) {
-                // 直接销毁
+                // 直接销毁范围内的水果
+                // 添加销毁特效
+                this.mergeEffects.push({
+                    x: body.position.x,
+                    y: body.position.y,
+                    radius: body.radius,
+                    type: 'explosion_destroy',
+                    startTime: Date.now(),
+                    duration: 300
+                });
                 this.world.remove(body);
                 destroyedCount++;
             } else if (dist < BOMB.blastRadius) {
-                // 施加爆炸冲量
+                // 冲击波范围内的水果受到冲量
                 body.wake();
                 const force = BOMB.blastForce * (1 - dist / BOMB.blastRadius);
-                const direction = new Vector(dx, dy).normalize();
+                const direction = new Vector(dx / dist, dy / dist);
                 body.velocity = body.velocity.add(direction.mult(force));
             }
         }
@@ -989,14 +1245,97 @@ class Game {
             x: center.x,
             y: center.y,
             startTime: Date.now(),
-            duration: 600
+            duration: 600,
+            radius: BOMB.blastRadius
         });
+        
+        // 触发屏幕震动
+        if (BOMB.screenShake) {
+            this.startMergeShake(BOMB.screenShake.intensity, BOMB.screenShake.duration);
+        }
         
         this.playSound('explosion');
         this.world.remove(bomb);
         
         if (destroyedCount > 0) {
-            this.showToast(`💥 炸毁 ${destroyedCount} 个水果！`);
+            this.showToast(`💥 炸毁 ${destroyedCount} 个水果！+${destroyedCount * BOMB.scoreBonus}`);
+        } else {
+            this.showToast(`💥 爆炸！`);
+        }
+        
+        // 处理连锁反应（延迟引爆）
+        for (const chainBomb of chainBombs) {
+            setTimeout(() => {
+                if (!chainBomb.exploded && !chainBomb.isRemoved) {
+                    this.explodeBomb(chainBomb);
+                }
+            }, 100);
+        }
+    }
+
+    // ==================== 引力场系统 ====================
+
+    /**
+     * 创建引力场
+     */
+    createGravityField(x, y) {
+        const field = {
+            x: x,
+            y: y,
+            radius: GRAVITY_FIELD.radius,
+            attractRadius: GRAVITY_FIELD.attractRadius,
+            startTime: Date.now(),
+            duration: GRAVITY_FIELD.duration
+        };
+        this.gravityFields.push(field);
+        this.playSound('fever_start');
+    }
+
+    /**
+     * 更新所有引力场
+     */
+    updateGravityFields() {
+        const now = Date.now();
+        
+        // 移除过期的引力场
+        this.gravityFields = this.gravityFields.filter(field => {
+            return now - field.startTime < field.duration;
+        });
+        
+        // 对每个引力场施加吸引力
+        for (const field of this.gravityFields) {
+            this.applyGravityFieldForce(field);
+        }
+    }
+
+    /**
+     * 应用引力场吸引力
+     */
+    applyGravityFieldForce(field) {
+        for (const body of this.world.bodies) {
+            if (body.label !== 'fruit' || body.isStatic || body.isRemoved) continue;
+            
+            const dx = field.x - body.position.x;
+            const dy = field.y - body.position.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < field.attractRadius && dist > 5) {
+                // 唤醒物体
+                body.wake();
+                
+                // 计算吸引力（距离越近越强）
+                const distRatio = 1 - (dist / field.attractRadius);
+                let force = GRAVITY_FIELD.attractForce * distRatio;
+                
+                // 中心区域强化吸引
+                if (dist < field.radius * 2) {
+                    force *= GRAVITY_FIELD.centerForce;
+                }
+                
+                // 应用力
+                const direction = new Vector(dx / dist, dy / dist);
+                body.velocity = body.velocity.add(direction.mult(force));
+            }
         }
     }
 
@@ -1010,29 +1349,120 @@ class Game {
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist < ICE_BLOCK.thawRadius) {
-                this.thawIceBlock(body);
+                this.thawIceBlock(body, 0);  // chainDepth = 0
             }
         }
     }
 
-    thawIceBlock(body) {
+    /**
+     * 解冻冰封水果（支持连锁反应）
+     * @param {Object} body - 冰封的水果刚体
+     * @param {number} chainDepth - 当前连锁深度
+     */
+    thawIceBlock(body, chainDepth = 0) {
+        if (body.iceState !== 'frozen') return;
         body.iceState = 'thawing';
+        
+        const thawPosition = { x: body.position.x, y: body.position.y };
         
         // 播放解冻动画
         this.iceThawEffects.push({
             body: body,
-            x: body.position.x,
-            y: body.position.y,
+            x: thawPosition.x,
+            y: thawPosition.y,
             startTime: Date.now(),
-            duration: 500
+            duration: 500,
+            isChainReaction: chainDepth > 0
         });
         
+        // 延迟后完成解冻
         setTimeout(() => {
             if (!body.isRemoved) {
                 body.iceState = 'normal';
-                this.showToast('🧊 冰块解冻！');
+                
+                // 触发冲击波
+                if (ICE_BLOCK.chainReaction && ICE_BLOCK.chainReaction.enabled) {
+                    this.triggerIceShockwave(thawPosition);
+                }
+                
+                // 检查连锁解冻
+                if (ICE_BLOCK.chainReaction && 
+                    ICE_BLOCK.chainReaction.enabled && 
+                    chainDepth < ICE_BLOCK.chainReaction.maxChainDepth) {
+                    this.checkChainThaw(thawPosition, chainDepth);
+                }
+                
+                // 显示提示
+                if (chainDepth === 0) {
+                    this.showToast('🧊 冰块解冻！');
+                } else {
+                    this.showToast(`🧊 连锁解冻 x${chainDepth + 1}！`);
+                }
             }
         }, 500);
+    }
+
+    /**
+     * 触发冰块解冻冲击波
+     * @param {Object} position - 冲击波中心位置
+     */
+    triggerIceShockwave(position) {
+        const config = ICE_BLOCK.chainReaction;
+        
+        for (const body of this.world.bodies) {
+            if (body.label !== 'fruit' || body.isRemoved) continue;
+            if (body.iceState === 'frozen' || body.iceState === 'thawing') continue;
+            
+            const dx = body.position.x - position.x;
+            const dy = body.position.y - position.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (dist < config.shockwaveRadius && dist > 0) {
+                // 唤醒并施加冲量
+                body.wake();
+                const direction = new Vector(dx / dist, dy / dist);
+                const force = config.shockwaveForce * (1 - dist / config.shockwaveRadius);
+                body.velocity = body.velocity.add(direction.mult(force));
+            }
+        }
+        
+        // 添加冲击波视觉效果
+        this.iceThawEffects.push({
+            type: 'shockwave',
+            x: position.x,
+            y: position.y,
+            radius: config.shockwaveRadius,
+            startTime: Date.now(),
+            duration: 400
+        });
+    }
+
+    /**
+     * 检查连锁解冻
+     * @param {Object} thawPosition - 解冻位置
+     * @param {number} currentDepth - 当前连锁深度
+     */
+    checkChainThaw(thawPosition, currentDepth) {
+        const config = ICE_BLOCK.chainReaction;
+        
+        for (const body of this.world.bodies) {
+            if (body.iceState !== 'frozen') continue;
+            
+            const dx = body.position.x - thawPosition.x;
+            const dy = body.position.y - thawPosition.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            // 在连锁半径内且通过概率检查
+            if (dist < config.chainRadius && Math.random() < config.chainProbability) {
+                // 延迟触发连锁解冻（错开时间以产生连锁效果）
+                const delay = 200 + currentDepth * 100;
+                setTimeout(() => {
+                    if (body.iceState === 'frozen' && !body.isRemoved) {
+                        this.thawIceBlock(body, currentDepth + 1);
+                    }
+                }, delay);
+            }
+        }
     }
 
     // ==================== Buff 系统方法 ====================
@@ -1080,14 +1510,105 @@ class Game {
             case 'dropGuide':
                 this.enableDropGuide();
                 break;
+            case 'piercingShot':
+                this.addPiercingCharges(effect.charges);
+                break;
+            case 'vaporize':
+                this.vaporizeSmallFruits(effect.maxLevel);
+                break;
+            case 'shuffle':
+                this.shuffleFruits();
+                break;
         }
         
-        // 记录 Buff
-        this.activeBuffs[buff.id] = true;
-        this.buffStacks[buff.id] = (this.buffStacks[buff.id] || 0) + 1;
+        // 记录 Buff（非即时效果）
+        if (!buff.immediate) {
+            this.activeBuffs[buff.id] = true;
+            this.buffStacks[buff.id] = (this.buffStacks[buff.id] || 0) + 1;
+        }
         
         this.hideBuffSelector();
         this.showToast(`${buff.icon} ${buff.name} 已激活！`);
+    }
+
+    /**
+     * 添加穿透弹次数
+     */
+    addPiercingCharges(charges) {
+        this.piercingCharges += charges;
+        console.log(`[Buff] 穿透弹 +${charges}，当前: ${this.piercingCharges}`);
+    }
+
+    /**
+     * 蒸发小型水果
+     * @param {number} maxLevel - 最大等级（包含）
+     */
+    vaporizeSmallFruits(maxLevel) {
+        let count = 0;
+        const toRemove = [];
+        
+        for (const body of this.world.bodies) {
+            if (body.label !== 'fruit' || body.isRemoved) continue;
+            if (body.fruitLevel <= maxLevel) {
+                toRemove.push(body);
+            }
+        }
+        
+        for (const body of toRemove) {
+            // 添加蒸发特效
+            this.mergeEffects.push({
+                x: body.position.x,
+                y: body.position.y,
+                radius: body.radius,
+                type: 'vaporize',
+                startTime: Date.now(),
+                duration: 400
+            });
+            
+            this.world.remove(body);
+            count++;
+        }
+        
+        if (count > 0) {
+            this.showToast(`💨 蒸发了 ${count} 个小水果！`);
+            this.playSound('destroy');
+        } else {
+            this.showToast('💨 没有可蒸发的水果');
+        }
+    }
+
+    /**
+     * 洗牌 - 随机重排所有水果位置
+     */
+    shuffleFruits() {
+        const fruits = this.world.bodies.filter(b => b.label === 'fruit' && !b.isRemoved);
+        
+        if (fruits.length < 2) {
+            this.showToast('🔀 水果太少，无法洗牌');
+            return;
+        }
+        
+        // 收集所有位置
+        const positions = fruits.map(f => ({ x: f.position.x, y: f.position.y }));
+        
+        // Fisher-Yates 洗牌算法
+        for (let i = positions.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [positions[i], positions[j]] = [positions[j], positions[i]];
+        }
+        
+        // 应用新位置
+        fruits.forEach((fruit, index) => {
+            fruit.position.x = positions[index].x;
+            fruit.position.y = positions[index].y;
+            fruit.velocity = new Vector(0, 0);
+            fruit.wake();
+        });
+        
+        // 触发震动效果
+        this.startMergeShake(15, 400);
+        this.playSound('drop');
+        this.showToast(`🔀 洗牌完成！`);
     }
 
     hideBuffSelector() {
@@ -1168,6 +1689,9 @@ class Game {
             this.saveBestScore();
         }
 
+        // 记录游戏结束统计
+        this.onGameEnd();
+
         // 上传分数到排行榜
         this.uploadScore();
 
@@ -1215,6 +1739,12 @@ class Game {
         // 重置特殊实体
         this.explosionEffects = [];
         this.iceThawEffects = [];
+        this.gravityFields = [];
+
+        // 重置合成反馈
+        this.mergeShake = null;
+        this.comboHueShift = 0;
+        this.comboSaturation = 1;
 
         // 重置 Buff 系统
         this.activeBuffs = {};
@@ -1222,6 +1752,7 @@ class Game {
         this.showDropGuide = false;
         this.showingBuffPanel = false;
         this.buffChoices = [];
+        this.piercingCharges = 0;
         
         // 恢复物理参数
         this.world.gravity = { x: PHYSICS.gravity.x, y: PHYSICS.gravity.y };
@@ -1624,10 +2155,65 @@ class Game {
                     this.showToast(`🔥 Combo +5 (当前: ${this.comboCount})`);
                 } else if (area.action === 'spawnFruit') {
                     this.debugSpawnRandomFruit();
+                } else if (area.action === 'spawnGravityField') {
+                    this.debugSpawnGravityField();
+                } else if (area.action === 'addPiercing') {
+                    this.piercingCharges += 3;
+                    this.showToast(`🎯 穿透弹 +3 (当前: ${this.piercingCharges})`);
+                } else if (area.action === 'triggerVaporize') {
+                    this.vaporizeSmallFruits(2);
+                } else if (area.action === 'triggerShuffle') {
+                    this.shuffleFruits();
+                } else if (area.action === 'triggerAntiGravity') {
+                    this.debugTriggerAntiGravity();
+                } else if (area.action === 'cycleSkin') {
+                    this.debugCycleSkin();
+                } else if (area.action === 'showStats') {
+                    this.debugShowStats();
+                } else if (area.action === 'togglePredictPath') {
+                    this.showDropGuide = !this.showDropGuide;
+                    this.showToast(`🎯 轨迹预测: ${this.showDropGuide ? '开启' : '关闭'}`);
                 }
                 return;
             }
         }
+    }
+    
+    // ==================== 新增调试方法 ====================
+    
+    debugSpawnGravityField() {
+        const x = this.gameArea.left + (this.gameArea.right - this.gameArea.left) / 2;
+        const y = this.gameArea.gameOverLineY + 100;
+        this.createGravityField(x, y);
+        this.showToast('🌀 已生成引力场');
+    }
+    
+    debugTriggerAntiGravity() {
+        // 临时触发反重力
+        const config = WEATHER.types.antiGravity;
+        if (config) {
+            this.currentWeather = 'antiGravity';
+            this.weatherEndTime = Date.now() + (config.duration || 1500);
+            this.nextWeatherTime = this.weatherEndTime + WEATHER.interval;
+            this._savedPhysics.gravityY = this.world.gravity.y;
+            this.setAntiGravity(config.gravityMultiplier);
+            this.showToast('🔮 已触发反重力');
+        }
+    }
+    
+    debugCycleSkin() {
+        const skinIds = Object.keys(SKINS);
+        const currentIndex = skinIds.indexOf(this.renderer.currentSkin);
+        const nextIndex = (currentIndex + 1) % skinIds.length;
+        const nextSkin = skinIds[nextIndex];
+        this.renderer.setSkin(nextSkin);
+        this.showToast(`🎨 皮肤: ${SKINS[nextSkin].name}`);
+    }
+    
+    debugShowStats() {
+        const stats = this.getStatsSummary();
+        console.log('[统计]', stats);
+        this.showToast(`📊 总游戏: ${stats.totalGames} | 西瓜: ${stats.totalWatermelons}`);
     }
     
     // ==================== 调试辅助方法 ====================
@@ -1715,7 +2301,11 @@ class Game {
             isFeverMode: this.isFeverMode,
             comboCount: this.comboCount,
             fruitCount: this.world.bodies.filter(b => b.label === 'fruit').length,
-            autoDropTime: this.autoDropDefaultTime
+            autoDropTime: this.autoDropDefaultTime,
+            showDropGuide: this.showDropGuide,
+            piercingCharges: this.piercingCharges,
+            currentSkin: this.renderer ? this.renderer.currentSkin : 'classic',
+            gravityFieldCount: this.gravityFields ? this.gravityFields.length : 0
         };
     }
 
@@ -1739,6 +2329,7 @@ class Game {
     start() {
         this.isRunning = true;
         this.lastTime = Date.now();
+        this.onGameStart();  // 记录游戏开始
         this.loop();
         console.log('[游戏] 开始运行');
     }
@@ -1777,6 +2368,9 @@ class Game {
             
             // 更新炸弹
             this.updateBombs();
+            
+            // 更新引力场
+            this.updateGravityFields();
         }
 
         // 更新特效
@@ -1846,11 +2440,22 @@ class Game {
     render() {
         const renderer = this.renderer;
 
-        // 应用屏幕震动
-        const shake = this.getScreenShakeOffset();
+        // 合并所有震动效果
+        const earthquakeShake = this.getScreenShakeOffset();
+        const mergeShake = this.getMergeShakeOffset();
+        const shake = {
+            x: earthquakeShake.x + mergeShake.x,
+            y: earthquakeShake.y + mergeShake.y
+        };
+        
         if (shake.x !== 0 || shake.y !== 0) {
             renderer.ctx.save();
             renderer.ctx.translate(shake.x * renderer.pixelRatio, shake.y * renderer.pixelRatio);
+        }
+        
+        // 应用 Combo 色调偏移滤镜
+        if (this.comboHueShift && this.comboHueShift > 0) {
+            renderer.ctx.filter = `hue-rotate(${this.comboHueShift}deg) saturate(${this.comboSaturation || 1})`;
         }
 
         // 清空画布
@@ -1905,6 +2510,12 @@ class Game {
             }
         }
 
+        // 绘制引力场
+        for (const field of this.gravityFields) {
+            const progress = (Date.now() - field.startTime) / field.duration;
+            renderer.drawGravityField(field.x, field.y, field.radius, field.attractRadius, progress);
+        }
+
         // 绘制所有水果
         renderer.drawFruits(this.world.bodies);
 
@@ -1927,11 +2538,34 @@ class Game {
             renderer.drawExplosionEffect(effect.x, effect.y, progress);
         }
 
-        // 绘制投影辅助线
+        // 绘制冰块解冻特效和冲击波
+        for (const effect of this.iceThawEffects) {
+            const progress = (now - effect.startTime) / effect.duration;
+            if (effect.type === 'shockwave') {
+                // 绘制冲击波
+                renderer.drawIceShockwave(effect.x, effect.y, effect.radius, progress);
+            }
+        }
+
+        // 绘制投影辅助线 / 动态轨迹预测
         if (this.showDropGuide && !this.isGameOver) {
             const fruit = FRUITS[this.currentFruitLevel];
             if (fruit) {
-                renderer.drawDropGuide(this.dropX, fruit.radius, this.gameArea);
+                // 计算风力影响
+                let windForce = null;
+                if (this.currentWeather === 'windy' && WEATHER.types.windy) {
+                    windForce = { x: WEATHER.types.windy.forceX, y: WEATHER.types.windy.forceY || 0 };
+                }
+                
+                const startY = this.gameArea.gameOverLineY - fruit.radius - 10;
+                renderer.drawPredictPath(
+                    this.dropX, 
+                    startY, 
+                    fruit.radius, 
+                    this.world.gravity, 
+                    windForce, 
+                    this.gameArea
+                );
             }
         }
 
@@ -2006,6 +2640,11 @@ class Game {
         // 绘制 Buff 选择面板
         if (this.showingBuffPanel) {
             this.buffPanelHitAreas = renderer.drawBuffSelector(this.buffChoices, this.buffStacks);
+        }
+
+        // 重置滤镜
+        if (this.comboHueShift && this.comboHueShift > 0) {
+            renderer.ctx.filter = 'none';
         }
 
         // 恢复屏幕震动变换
@@ -2085,6 +2724,173 @@ class Game {
         } catch (e) {
             console.log('[游戏] 保存道具失败');
         }
+    }
+
+    // ==================== 统计与成就系统 ====================
+
+    /**
+     * 加载已解锁的成就
+     */
+    loadUnlockedAchievements() {
+        try {
+            const saved = Platform.getStorageSync('daxigua_achievements');
+            return saved ? (typeof saved === 'string' ? JSON.parse(saved) : saved) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    /**
+     * 保存已解锁的成就
+     */
+    saveUnlockedAchievements() {
+        try {
+            Platform.setStorageSync('daxigua_achievements', JSON.stringify(this.unlockedAchievements));
+        } catch (e) {
+            console.log('[成就] 保存失败');
+        }
+    }
+
+    /**
+     * 记录合成统计
+     * @param {number} newLevel - 合成后的水果等级
+     */
+    recordMergeStat(newLevel) {
+        // 更新总合成次数
+        Platform.incrementStat('totalMerges');
+        this.sessionMerges++;
+        
+        // 更新各水果合成次数
+        const fruitMerges = Platform.getStat('fruitMerges', {});
+        fruitMerges[newLevel] = (fruitMerges[newLevel] || 0) + 1;
+        Platform.saveStat('fruitMerges', fruitMerges);
+        
+        // 如果合成了西瓜
+        if (newLevel === 10) {
+            Platform.incrementStat('totalWatermelons');
+            this.sessionWatermelons++;
+            
+            // 记录最快合成西瓜时间
+            if (this.gameStartTime > 0) {
+                const timeToWatermelon = Math.floor((Date.now() - this.gameStartTime) / 1000);
+                const currentFastest = Platform.getStat('fastestWatermelon', 9999);
+                if (timeToWatermelon < currentFastest) {
+                    Platform.saveStat('fastestWatermelon', timeToWatermelon);
+                }
+            }
+        }
+        
+        // 检查成就
+        this.checkAchievements();
+    }
+
+    /**
+     * 记录连击统计
+     * @param {number} comboCount - 当前连击数
+     */
+    recordComboStat(comboCount) {
+        Platform.updateMaxStat('maxCombo', comboCount);
+        this.checkAchievements();
+    }
+
+    /**
+     * 游戏开始时调用
+     */
+    onGameStart() {
+        this.gameStartTime = Date.now();
+        this.sessionMerges = 0;
+        this.sessionWatermelons = 0;
+        Platform.incrementStat('totalGames');
+    }
+
+    /**
+     * 游戏结束时调用
+     */
+    onGameEnd() {
+        // 记录游戏时长
+        if (this.gameStartTime > 0) {
+            const playTime = Math.floor((Date.now() - this.gameStartTime) / 1000);
+            Platform.incrementStat('totalPlayTime', playTime);
+        }
+        
+        // 更新最高分
+        Platform.updateMaxStat('highestScore', this.score);
+        
+        // 检查成就
+        this.checkAchievements();
+    }
+
+    /**
+     * 检查并解锁成就
+     */
+    checkAchievements() {
+        for (const achievement of ACHIEVEMENTS) {
+            // 跳过已解锁的
+            if (this.unlockedAchievements.includes(achievement.id)) continue;
+            
+            const { stat, value, compare } = achievement.condition;
+            const currentValue = Platform.getStat(stat, 0);
+            
+            let unlocked = false;
+            if (compare === 'lte') {
+                unlocked = currentValue > 0 && currentValue <= value;
+            } else {
+                unlocked = currentValue >= value;
+            }
+            
+            if (unlocked) {
+                this.unlockAchievement(achievement);
+            }
+        }
+    }
+
+    /**
+     * 解锁成就
+     */
+    unlockAchievement(achievement) {
+        this.unlockedAchievements.push(achievement.id);
+        this.saveUnlockedAchievements();
+        this.newAchievements.push(achievement);
+        
+        // 显示成就解锁提示
+        this.showToast(`🏆 成就解锁: ${achievement.name}`);
+        this.playSound('success');
+        
+        console.log(`[成就] 解锁: ${achievement.name}`);
+    }
+
+    /**
+     * 获取统计摘要
+     */
+    getStatsSummary() {
+        return {
+            totalGames: Platform.getStat('totalGames', 0),
+            totalMerges: Platform.getStat('totalMerges', 0),
+            totalWatermelons: Platform.getStat('totalWatermelons', 0),
+            maxCombo: Platform.getStat('maxCombo', 0),
+            highestScore: Platform.getStat('highestScore', 0),
+            fastestWatermelon: Platform.getStat('fastestWatermelon', 0),
+            totalPlayTime: Platform.getStat('totalPlayTime', 0),
+            fruitMerges: Platform.getStat('fruitMerges', {}),
+            unlockedAchievements: this.unlockedAchievements.length,
+            totalAchievements: ACHIEVEMENTS.length
+        };
+    }
+
+    /**
+     * 显示统计面板
+     */
+    showStatsPanel() {
+        this.showingStatsPanel = true;
+        this.isPaused = true;
+    }
+
+    /**
+     * 隐藏统计面板
+     */
+    hideStatsPanel() {
+        this.showingStatsPanel = false;
+        this.isPaused = false;
     }
 }
 
