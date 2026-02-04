@@ -6,6 +6,10 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Quicksand', 'sans-serif'],
+        hand: ['Caveat', 'cursive'],
+      },
       colors: {
         'game-bg': '#f5deb3',
         'game-ground': '#8b4513',
