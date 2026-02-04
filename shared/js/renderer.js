@@ -463,7 +463,7 @@ class Renderer {
     }
 
     // 绘制道具栏
-    drawToolbar(tools, onToolClick) {
+    drawToolbar(tools, skillCooldowns = {}) {
         const ctx = this.ctx;
         const pr = this.pixelRatio;
         
@@ -488,13 +488,15 @@ class Renderer {
         );
         ctx.fill();
 
-        // 绘制按钮（添加分享按钮）
+        // 绘制按钮（添加分享按钮和技能按钮）
         const buttons = [
             { id: 'hammer', icon: '🔨', name: '锤子', count: tools.hammer, color: COLORS.buttonBg },
             { id: 'selectFruit', icon: '🍇', name: '选果', count: tools.selectFruit, color: COLORS.buttonBg },
             { id: 'skip', icon: '⏭️', name: '跳过', count: tools.skip, color: COLORS.buttonBg },
-            { id: 'share', icon: '📤', name: '分享', count: null, color: '#2196F3' },
-            { id: 'ad', icon: '🎬', name: '广告', count: null, color: COLORS.adButtonBg }
+            { id: 'shake', icon: '📳', name: '震动', count: null, color: '#FF9800', type: 'cooldown' },
+            { id: 'gust', icon: '💨', name: '吹风', count: null, color: '#00BCD4', type: 'cooldown' },
+            // { id: 'share', icon: '📤', name: '分享', count: null, color: '#2196F3' }, // 空间不足暂时隐藏
+            // { id: 'ad', icon: '🎬', name: '广告', count: null, color: COLORS.adButtonBg }
         ];
 
         const hitAreas = [];
@@ -530,6 +532,23 @@ class Renderer {
                 ctx.fillStyle = '#fff';
                 ctx.font = `bold ${10 * pr}px Arial`;
                 ctx.fillText(String(btn.count), countX * pr, countY * pr);
+            } else if (btn.type === 'cooldown') {
+                // 冷却遮罩
+                const now = Date.now();
+                const lastUsed = skillCooldowns[btn.id] || 0;
+                const cooldownTime = TOOLS[btn.id].cooldown;
+                const elapsed = now - lastUsed;
+                
+                if (elapsed < cooldownTime) {
+                    const ratio = 1 - elapsed / cooldownTime;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    this.roundRect(ctx, x * pr, (y + buttonHeight * (1-ratio)) * pr, buttonWidth * pr, buttonHeight * ratio * pr, 10 * pr);
+                    ctx.fill();
+                    
+                    ctx.fillStyle = '#fff';
+                    ctx.font = `${12 * pr}px Arial`;
+                    ctx.fillText(`${Math.ceil((cooldownTime - elapsed)/1000)}s`, (x + buttonWidth / 2) * pr, (y + buttonHeight / 2) * pr);
+                }
             } else {
                 // 免费标签
                 ctx.fillStyle = '#ffeb3b';

@@ -60,7 +60,17 @@ var RULES = {
 var TOOLS = {
     hammer: { initial: 3, adReward: 1, name: '锤子', icon: '🔨' },
     selectFruit: { initial: 2, adReward: 1, name: '选果', icon: '🍇' },
-    skip: { initial: 5, adReward: 2, name: '跳过', icon: '⏭️' }
+    skip: { initial: 5, adReward: 2, name: '跳过', icon: '⏭️' },
+    shake: { initial: 1, type: 'cooldown', cooldown: 10000, name: '震动', icon: '📳' }, // 10秒冷却
+    gust: { initial: 1, type: 'cooldown', cooldown: 15000, name: '吹风', icon: '💨' }  // 15秒冷却
+};
+
+// 混沌模式配置
+var CHAOS = {
+    enabled: true,
+    artifactThreshold: 500, // 每500分触发一次神器选择
+    livingJar: true,        // 呼吸墙壁
+    fruitSlice: true        // 切水果模式
 };
 
 // 广告配置
@@ -449,6 +459,7 @@ var GameConfig = {
     GAME_AREA: GAME_AREA,
     RULES: RULES,
     TOOLS: TOOLS,
+    CHAOS: CHAOS,
     AD_CONFIG: AD_CONFIG,
     SHARE_CONFIG: SHARE_CONFIG,
     DEBUG_CONFIG: DEBUG_CONFIG,

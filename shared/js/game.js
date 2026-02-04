@@ -48,6 +48,7 @@ var MYSTERY_BOX = Config ? Config.MYSTERY_BOX : {};
 var BOMB = Config ? Config.BOMB : {};
 var ICE_BLOCK = Config ? Config.ICE_BLOCK : {};
 var BUFFS = Config ? Config.BUFFS : {};
+var CHAOS = Config ? Config.CHAOS : {};
 var MERGE_FEEDBACK = Config ? Config.MERGE_FEEDBACK : {};
 var STATS = Config ? Config.STATS : {};
 var ACHIEVEMENTS = Config ? Config.ACHIEVEMENTS : [];
@@ -185,6 +186,12 @@ class Game {
         this.showingStatsPanel = false;   // 是否显示统计面板
         this.statsPanelHitAreas = [];     // 统计面板点击区域
 
+        // ==================== 混沌模式 ====================
+        this.lastArtifactScore = 0;
+        this.skillCooldowns = { shake: 0, gust: 0 };
+        this.wallPhase = 0;
+        this.lastTouchPos = null; // 用于切水果检测
+
         // 初始化
         this.init();
     }
@@ -281,6 +288,7 @@ class Game {
             const touch = e.touches[0];
             const x = touch.clientX;
             const y = touch.clientY;
+            this.lastTouchPos = { x, y };
 
             // 处理水果选择面板点击
             if (this.showingFruitSelector) {
@@ -355,11 +363,21 @@ class Game {
             if (this.isGameOver || this.hammerMode || this.isPaused) return;
             
             const touch = e.touches[0];
+            const x = touch.clientX;
+            const y = touch.clientY;
+
+            // 切水果检测
+            if (CHAOS.fruitSlice && this.lastTouchPos) {
+                this.checkFruitSlice(this.lastTouchPos.x, this.lastTouchPos.y, x, y);
+            }
+            this.lastTouchPos = { x, y };
+
             this.updateDropPosition(touch.clientX);
         }, this.canvas);
 
         // 触摸结束 - 投放水果
         Platform.onTouchEnd((e) => {
+            this.lastTouchPos = null;
             if (this.isGameOver || this.hammerMode) return;
             
             // 检查是否点击了 UI
@@ -597,6 +615,13 @@ class Game {
         const baseScore = newFruit.score;
         const finalScore = this.calculateMergeScore(baseScore);
         this.score += finalScore;
+
+        // 检查神器阈值 (Roguelike Artifacts)
+        if (CHAOS.enabled && this.score - this.lastArtifactScore >= CHAOS.artifactThreshold) {
+            this.lastArtifactScore = Math.floor(this.score / CHAOS.artifactThreshold) * CHAOS.artifactThreshold;
+            this.showBuffSelector(); // 复用 Buff 选择器作为神器选择
+            this.showToast('🔮 神器能量充满！');
+        }
 
         // 记录统计
         this.recordMergeStat(newLevel);
@@ -1689,6 +1714,127 @@ class Game {
         return false;
     }
 
+    // ==================== 混沌模式方法 ====================
+
+    updateLivingJar(now) {
+        // 呼吸效果：周期 5秒，幅度 15px
+        const phase = (now / 5000) * Math.PI * 2;
+        const breath = Math.sin(phase) * 15;
+        
+        // 动态调整墙壁位置
+        const leftWall = this.world.walls.find(w => w.label === 'leftWall');
+        const rightWall = this.world.walls.find(w => w.label === 'rightWall');
+        
+        if (leftWall && rightWall) {
+            // 基础位置
+            const baseLeft = this.width * GAME_AREA.sideMargin + 20;
+            const baseRight = this.width * (1 - GAME_AREA.sideMargin) - 20;
+            
+            // 应用呼吸
+            leftWall.position.x = baseLeft - breath;
+            rightWall.position.x = baseRight + breath;
+            
+            // 更新游戏区域边界（用于投放限制）
+            this.gameArea.left = leftWall.position.x + leftWall.width/2;
+            this.gameArea.right = rightWall.position.x - rightWall.width/2;
+        }
+    }
+
+    checkFruitSlice(x1, y1, x2, y2) {
+        // 简单的线段与圆相交检测
+        for (const body of this.world.bodies) {
+            if (body.label !== 'fruit' || body.isRemoved) continue;
+            if (body.fruitLevel <= 0) continue; // 最小水果不可切
+            if (body.isStatic) continue;
+            
+            // 只能切下落中的水果（速度向下且未触地）
+            // 放宽条件：只要在空中即可，不需要严格速度限制，提升手感
+            const isAirborne = body.position.y < this.gameArea.groundY - body.radius * 2;
+            if (!isAirborne) continue;
+
+            const dist = this.pointLineDistance(body.position.x, body.position.y, x1, y1, x2, y2);
+            if (dist < body.radius) {
+                this.splitFruit(body);
+                // 每次划动只切一个，避免瞬间清屏
+                return;
+            }
+        }
+    }
+
+    pointLineDistance(px, py, x1, y1, x2, y2) {
+        const A = px - x1;
+        const B = py - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+
+        const dot = A * C + B * D;
+        const len_sq = C * C + D * D;
+        let param = -1;
+        if (len_sq !== 0) // in case of 0 length line
+            param = dot / len_sq;
+
+        let xx, yy;
+
+        if (param < 0) {
+            xx = x1;
+            yy = y1;
+        } else if (param > 1) {
+            xx = x2;
+            yy = y2;
+        } else {
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+        }
+
+        const dx = px - xx;
+        const dy = py - yy;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    splitFruit(body) {
+        if (body.isRemoved) return;
+        
+        const level = body.fruitLevel;
+        if (level <= 0) return;
+        
+        const newLevel = level - 1;
+        const newFruit = FRUITS[newLevel];
+        
+        this.world.remove(body);
+        
+        // 分裂成两个小水果
+        for (let i = -1; i <= 1; i += 2) {
+            const newBody = new Circle(
+                body.position.x + i * newFruit.radius * 0.5,
+                body.position.y,
+                newFruit.radius,
+                {
+                    restitution: PHYSICS.restitution,
+                    friction: PHYSICS.friction,
+                    frictionAir: PHYSICS.frictionAir,
+                    label: 'fruit',
+                    fruitLevel: newLevel
+                }
+            );
+            // 赋予向外的速度
+            newBody.velocity = body.velocity.add(new Vector(i * 100, -50));
+            this.world.add(newBody);
+        }
+        
+        this.showToast('⚔️ 切开！');
+        this.playSound('destroy');
+        
+        // 特效
+        this.mergeEffects.push({
+            x: body.position.x,
+            y: body.position.y,
+            radius: body.radius,
+            type: 'pierce',
+            startTime: Date.now(),
+            duration: 300
+        });
+    }
+
     checkGameOver() {
         // 反重力保护期：跳过游戏结束检测
         if (this.antiGravityProtection) {
@@ -1853,7 +1999,48 @@ class Game {
             case 'ad':
                 this.showAdRewardPanel();
                 break;
+            case 'shake':
+                this.useSkill('shake');
+                break;
+            case 'gust':
+                this.useSkill('gust');
+                break;
         }
+    }
+
+    useSkill(skillId) {
+        const now = Date.now();
+        const cooldown = TOOLS[skillId].cooldown;
+        const lastUsed = this.skillCooldowns[skillId] || 0;
+        
+        if (now - lastUsed < cooldown) {
+            const remaining = Math.ceil((cooldown - (now - lastUsed)) / 1000);
+            this.showToast(`${TOOLS[skillId].name} 冷却中 (${remaining}s)`);
+            return;
+        }
+        
+        // 技能效果
+        if (skillId === 'shake') {
+            this.triggerEarthquake(); // 复用地震逻辑
+            this.showToast('📳 强力震动！');
+        } else if (skillId === 'gust') {
+            this.applyGust();
+            this.showToast('💨 一阵狂风！');
+        }
+        
+        this.skillCooldowns[skillId] = now;
+    }
+
+    applyGust() {
+        // 向上吹飞所有水果
+        for (const body of this.world.bodies) {
+            if (body.label === 'fruit' && !body.isStatic) {
+                body.wake();
+                // 向上 + 随机左右
+                body.velocity = body.velocity.add(new Vector((Math.random() - 0.5) * 5, -15));
+            }
+        }
+        this.startRandomWeather(); // 顺便触发一下天气效果（视觉）
     }
 
     activateHammer() {
@@ -2424,6 +2611,11 @@ class Game {
             
             // 更新引力场
             this.updateGravityFields();
+
+            // 呼吸墙壁
+            if (CHAOS.livingJar) {
+                this.updateLivingJar(now);
+            }
         }
 
         // 更新特效
@@ -2646,7 +2838,7 @@ class Game {
         this.rankButtonArea = renderer.drawRankButton();
 
         // 绘制道具栏
-        this.toolbarHitAreas = renderer.drawToolbar(this.tools);
+        this.toolbarHitAreas = renderer.drawToolbar(this.tools, this.skillCooldowns);
 
         // 绘制提示消息
         for (const toast of this.toasts) {
