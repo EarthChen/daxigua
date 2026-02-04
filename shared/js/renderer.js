@@ -1165,6 +1165,53 @@ class Renderer {
         hitAreas.push({ action: 'spawnGravityField', x: panelX + 15, y: currentY, width: panelWidth - 30, height: btnHeight });
         currentY += btnHeight + 15;
 
+        // === 混沌模式区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('🌀 混沌模式', (panelX + 15) * pr, currentY * pr);
+        currentY += 20;
+
+        const chaosButtons = [
+            { label: '🔮 神器', action: 'triggerArtifact', color: '#9c27b0' },
+            { label: '📳 震动', action: 'triggerShake', color: '#ff9800' },
+            { label: '💨 吹风', action: 'triggerGust', color: '#00bcd4' }
+        ];
+
+        chaosButtons.forEach((btn, i) => {
+            const x = panelX + 15 + i * (btnWidth + gap);
+            ctx.fillStyle = btn.color;
+            this.roundRect(ctx, x * pr, currentY * pr, btnWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: btnWidth, height: btnHeight });
+        });
+        currentY += btnHeight + gap;
+
+        // 开关
+        const chaosToggles = [
+            { label: '🔄 呼吸墙', action: 'toggleLivingJar', key: 'livingJarEnabled' },
+            { label: '⚔️ 切水果', action: 'toggleFruitSlice', key: 'fruitSliceEnabled' }
+        ];
+
+        chaosToggles.forEach((btn, i) => {
+            const x = panelX + 15 + i * (halfWidth + gap);
+            const isEnabled = debugState[btn.key];
+            ctx.fillStyle = isEnabled ? '#2ecc71' : '#7f8c8d';
+            this.roundRect(ctx, x * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            const statusText = isEnabled ? '开' : '关';
+            ctx.fillText(`${btn.label} ${statusText}`, (x + halfWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: halfWidth, height: btnHeight });
+        });
+        currentY += btnHeight + 15;
+
         // === v2.0 新增功能区域 ===
         ctx.fillStyle = '#4a5568';
         ctx.font = `bold ${11 * pr}px Arial`;

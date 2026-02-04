@@ -2413,6 +2413,18 @@ class Game {
                 } else if (area.action === 'togglePredictPath') {
                     this.showDropGuide = !this.showDropGuide;
                     this.showToast(`🎯 轨迹预测: ${this.showDropGuide ? '开启' : '关闭'}`);
+                } else if (area.action === 'triggerArtifact') {
+                    this.showBuffSelector();
+                } else if (area.action === 'triggerShake') {
+                    this.useSkill('shake');
+                } else if (area.action === 'triggerGust') {
+                    this.useSkill('gust');
+                } else if (area.action === 'toggleLivingJar') {
+                    CHAOS.livingJar = !CHAOS.livingJar;
+                    this.showToast(`🔄 呼吸墙: ${CHAOS.livingJar ? '开启' : '关闭'}`);
+                } else if (area.action === 'toggleFruitSlice') {
+                    CHAOS.fruitSlice = !CHAOS.fruitSlice;
+                    this.showToast(`⚔️ 切水果: ${CHAOS.fruitSlice ? '开启' : '关闭'}`);
                 }
                 return;
             }
@@ -2545,7 +2557,9 @@ class Game {
             showDropGuide: this.showDropGuide,
             piercingCharges: this.piercingCharges,
             currentSkin: this.renderer ? this.renderer.currentSkin : 'classic',
-            gravityFieldCount: this.gravityFields ? this.gravityFields.length : 0
+            gravityFieldCount: this.gravityFields ? this.gravityFields.length : 0,
+            livingJarEnabled: CHAOS.livingJar,
+            fruitSliceEnabled: CHAOS.fruitSlice
         };
     }
 
