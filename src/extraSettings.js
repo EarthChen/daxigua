@@ -123,9 +123,7 @@ class ToolSystem {
         // 更新按钮禁用状态
         const hammerBtn = document.getElementById('hammerTool');
         const selectBtn = document.getElementById('selectFruitTool');
-        const skipBtn = document.getElementById('skipTool');
-
-        if (hammerBtn) hammerBtn.disabled = this.toolCount.hammer <= 0;
+        const skipBtn = document.getElementById('skipTool');        if (hammerBtn) hammerBtn.disabled = this.toolCount.hammer <= 0;
         if (selectBtn) selectBtn.disabled = this.toolCount.selectFruit <= 0;
         if (skipBtn) skipBtn.disabled = this.toolCount.skip <= 0;
     }
@@ -263,9 +261,7 @@ class ToolSystem {
         } catch (e) {
             console.error('[道具系统] 启用水果点击失败:', e);
         }
-    }
-
-    /**
+    }    /**
      * 移除所有水果的点击事件
      */
     disableFruitClickHandlers() {

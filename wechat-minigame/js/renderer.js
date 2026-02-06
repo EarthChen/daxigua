@@ -29,6 +29,9 @@ var WEATHER = Config ? Config.WEATHER : {};
 var BOMB = Config ? Config.BOMB : {};
 var ICE_BLOCK = Config ? Config.ICE_BLOCK : {};
 var BUFFS = Config ? Config.BUFFS : {};
+var SKINS = Config ? Config.SKINS : {};
+var TOOLS = Config ? Config.TOOLS : {};
+var CHAOS = (Config && Config.CHAOS) || {};
 
 class Renderer {
     constructor(config) {
@@ -48,9 +51,48 @@ class Renderer {
             groundY: this.height * (1 - GAME_AREA.bottomMargin)
         };
         
+        // 皮肤系统
+        this.currentSkin = this.loadSkin() || 'classic';
+        this.skinConfig = SKINS[this.currentSkin] || SKINS.classic;
+        
         // 缓存水果图像
         this.fruitImages = {};
         this.loadFruitImages();
+    }
+
+    /**
+     * 加载保存的皮肤选择
+     */
+    loadSkin() {
+        try {
+            return Platform.getStorageSync('daxigua_skin') || 'classic';
+        } catch (e) {
+            return 'classic';
+        }
+    }
+
+    /**
+     * 切换皮肤
+     */
+    setSkin(skinId) {
+        if (SKINS[skinId]) {
+            this.currentSkin = skinId;
+            this.skinConfig = SKINS[skinId];
+            try {
+                Platform.setStorageSync('daxigua_skin', skinId);
+            } catch (e) {}
+            console.log(`[皮肤] 切换到: ${SKINS[skinId].name}`);
+        }
+    }
+
+    /**
+     * 获取当前皮肤的水果颜色
+     */
+    getSkinFruitColor(level) {
+        if (this.skinConfig.fruits && this.skinConfig.fruits[level]) {
+            return this.skinConfig.fruits[level].color;
+        }
+        return FRUITS[level]?.color || '#888888';
     }
 
     loadFruitImages() {
@@ -77,36 +119,133 @@ class Renderer {
         const ctx = this.ctx;
         const pr = this.pixelRatio;
 
-        // 背景渐变
+        // 使用皮肤配置的背景颜色
+        const bgConfig = this.skinConfig.background || { topColor: '#fef3c7', bottomColor: '#f5deb3' };
+        
         const gradient = ctx.createLinearGradient(0, 0, 0, this.canvas.height);
-        gradient.addColorStop(0, '#fef3c7');
-        gradient.addColorStop(1, '#f5deb3');
+        gradient.addColorStop(0, bgConfig.topColor);
+        gradient.addColorStop(1, bgConfig.bottomColor);
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
     // 绘制墙壁和地面
-    drawWalls() {
+    drawWalls(wallState) {
         const ctx = this.ctx;
         const pr = this.pixelRatio;
         const ga = this.gameArea;
+
+        // 使用皮肤配置的地面颜色
+        const groundConfig = this.skinConfig.ground || { 
+            topColor: '#8B4513', 
+            midColor: '#654321', 
+            bottomColor: '#3d2914' 
+        };
 
         // 地面
         const groundGradient = ctx.createLinearGradient(
             0, ga.groundY * pr,
             0, this.canvas.height
         );
-        groundGradient.addColorStop(0, '#8B4513');
-        groundGradient.addColorStop(0.1, '#654321');
-        groundGradient.addColorStop(1, '#3d2914');
+        groundGradient.addColorStop(0, groundConfig.topColor);
+        groundGradient.addColorStop(0.1, groundConfig.midColor);
+        groundGradient.addColorStop(1, groundConfig.bottomColor);
         
         ctx.fillStyle = groundGradient;
         ctx.fillRect(0, ga.groundY * pr, this.canvas.width, (this.height - ga.groundY) * pr);
 
         // 地面纹理
-        ctx.fillStyle = '#654321';
+        ctx.fillStyle = groundConfig.midColor;
         const stripeHeight = 10 * pr;
         ctx.fillRect(0, ga.groundY * pr, this.canvas.width, stripeHeight);
+
+        // 绘制侧墙壁
+        this.drawSideWalls(wallState);
+    }
+
+    // 绘制可见的侧墙壁
+    drawSideWalls(wallState) {
+        const ctx = this.ctx;
+        const pr = this.pixelRatio;
+        const ga = this.gameArea;
+
+        // 墙壁位置：优先使用传入的实际物理墙壁位置
+        const leftX = wallState ? wallState.leftX : ga.left;
+        const rightX = wallState ? wallState.rightX : ga.right;
+        const isBreathing = wallState ? wallState.isBreathing : false;
+        const breathPhase = wallState ? wallState.breathPhase : 0;
+
+        const topY = ga.top;
+        const bottomY = ga.groundY;
+        const wallWidth = 5;
+
+        // 使用皮肤的地面颜色作为墙壁基色
+        const groundConfig = this.skinConfig.ground || { topColor: '#8B4513', midColor: '#654321' };
+
+        // 左墙壁
+        const leftGradient = ctx.createLinearGradient(
+            (leftX - wallWidth) * pr, 0,
+            (leftX + 2) * pr, 0
+        );
+        leftGradient.addColorStop(0, 'rgba(101, 67, 33, 0.3)');
+        leftGradient.addColorStop(0.5, 'rgba(139, 69, 19, 0.6)');
+        leftGradient.addColorStop(1, 'rgba(101, 67, 33, 0.2)');
+        ctx.fillStyle = leftGradient;
+        ctx.fillRect(
+            (leftX - wallWidth) * pr, topY * pr,
+            (wallWidth + 1) * pr, (bottomY - topY) * pr
+        );
+
+        // 右墙壁
+        const rightGradient = ctx.createLinearGradient(
+            (rightX - 2) * pr, 0,
+            (rightX + wallWidth) * pr, 0
+        );
+        rightGradient.addColorStop(0, 'rgba(101, 67, 33, 0.2)');
+        rightGradient.addColorStop(0.5, 'rgba(139, 69, 19, 0.6)');
+        rightGradient.addColorStop(1, 'rgba(101, 67, 33, 0.3)');
+        ctx.fillStyle = rightGradient;
+        ctx.fillRect(
+            (rightX - 1) * pr, topY * pr,
+            (wallWidth + 1) * pr, (bottomY - topY) * pr
+        );
+
+        // 呼吸模式视觉效果
+        if (isBreathing) {
+            const pulseAlpha = 0.1 + Math.abs(Math.sin(breathPhase)) * 0.25;
+            
+            // 左墙壁内侧发光
+            const leftGlow = ctx.createLinearGradient(
+                leftX * pr, 0,
+                (leftX + 12) * pr, 0
+            );
+            leftGlow.addColorStop(0, `rgba(255, 180, 60, ${pulseAlpha})`);
+            leftGlow.addColorStop(1, 'rgba(255, 180, 60, 0)');
+            ctx.fillStyle = leftGlow;
+            ctx.fillRect(leftX * pr, topY * pr, 12 * pr, (bottomY - topY) * pr);
+
+            // 右墙壁内侧发光
+            const rightGlow = ctx.createLinearGradient(
+                (rightX - 12) * pr, 0,
+                rightX * pr, 0
+            );
+            rightGlow.addColorStop(0, 'rgba(255, 180, 60, 0)');
+            rightGlow.addColorStop(1, `rgba(255, 180, 60, ${pulseAlpha})`);
+            ctx.fillStyle = rightGlow;
+            ctx.fillRect((rightX - 12) * pr, topY * pr, 12 * pr, (bottomY - topY) * pr);
+
+            // 墙壁边缘高亮线
+            ctx.strokeStyle = `rgba(255, 200, 80, ${pulseAlpha * 1.5})`;
+            ctx.lineWidth = 2 * pr;
+            ctx.beginPath();
+            ctx.moveTo(leftX * pr, topY * pr);
+            ctx.lineTo(leftX * pr, bottomY * pr);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(rightX * pr, topY * pr);
+            ctx.lineTo(rightX * pr, bottomY * pr);
+            ctx.stroke();
+        }
     }
 
     // 绘制游戏结束线
@@ -228,11 +367,14 @@ class Renderer {
         ctx.restore();
     }
 
-    // 使用渐变绘制水果（增强版）
+    // 使用渐变绘制水果（增强版，支持皮肤）
     drawFruitGradient(x, y, radius, level) {
         const ctx = this.ctx;
         const pr = this.pixelRatio;
         const fruit = FRUITS[level];
+        
+        // 使用皮肤颜色
+        const fruitColor = this.getSkinFruitColor(level);
 
         // 水果阴影
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
@@ -245,11 +387,11 @@ class Renderer {
             (x - radius * 0.3) * pr, (y - radius * 0.4) * pr, 0,
             x * pr, y * pr, radius * pr * 1.1
         );
-        gradient.addColorStop(0, this.lightenColor(fruit.color, 50));
-        gradient.addColorStop(0.3, this.lightenColor(fruit.color, 20));
-        gradient.addColorStop(0.6, fruit.color);
-        gradient.addColorStop(0.9, this.darkenColor(fruit.color, 15));
-        gradient.addColorStop(1, this.darkenColor(fruit.color, 30));
+        gradient.addColorStop(0, this.lightenColor(fruitColor, 50));
+        gradient.addColorStop(0.3, this.lightenColor(fruitColor, 20));
+        gradient.addColorStop(0.6, fruitColor);
+        gradient.addColorStop(0.9, this.darkenColor(fruitColor, 15));
+        gradient.addColorStop(1, this.darkenColor(fruitColor, 30));
 
         ctx.beginPath();
         ctx.arc(x * pr, y * pr, radius * pr, 0, Math.PI * 2);
@@ -263,7 +405,7 @@ class Renderer {
         ctx.shadowOffsetY = 0;
 
         // 边框
-        ctx.strokeStyle = this.darkenColor(fruit.color, 35);
+        ctx.strokeStyle = this.darkenColor(fruitColor, 35);
         ctx.lineWidth = 2.5 * pr;
         ctx.stroke();
 
@@ -411,7 +553,7 @@ class Renderer {
     }
 
     // 绘制道具栏
-    drawToolbar(tools, onToolClick) {
+    drawToolbar(tools, skillCooldowns = {}) {
         const ctx = this.ctx;
         const pr = this.pixelRatio;
         
@@ -436,13 +578,15 @@ class Renderer {
         );
         ctx.fill();
 
-        // 绘制按钮（添加分享按钮）
+        // 绘制按钮（添加分享按钮和技能按钮）
         const buttons = [
             { id: 'hammer', icon: '🔨', name: '锤子', count: tools.hammer, color: COLORS.buttonBg },
             { id: 'selectFruit', icon: '🍇', name: '选果', count: tools.selectFruit, color: COLORS.buttonBg },
             { id: 'skip', icon: '⏭️', name: '跳过', count: tools.skip, color: COLORS.buttonBg },
-            { id: 'share', icon: '📤', name: '分享', count: null, color: '#2196F3' },
-            { id: 'ad', icon: '🎬', name: '广告', count: null, color: COLORS.adButtonBg }
+            { id: 'shake', icon: '📳', name: '震动', count: null, color: '#FF9800', type: 'cooldown' },
+            { id: 'gust', icon: '💨', name: '吹风', count: null, color: '#00BCD4', type: 'cooldown' },
+            // { id: 'share', icon: '📤', name: '分享', count: null, color: '#2196F3' }, // 空间不足暂时隐藏
+            // { id: 'ad', icon: '🎬', name: '广告', count: null, color: COLORS.adButtonBg }
         ];
 
         const hitAreas = [];
@@ -478,6 +622,25 @@ class Renderer {
                 ctx.fillStyle = '#fff';
                 ctx.font = `bold ${10 * pr}px Arial`;
                 ctx.fillText(String(btn.count), countX * pr, countY * pr);
+            } else if (btn.type === 'cooldown') {
+                // 冷却遮罩
+                const now = Date.now();
+                const lastUsed = skillCooldowns[btn.id] || 0;
+                // 防御性检查
+                const toolConfig = TOOLS[btn.id];
+                const cooldownTime = toolConfig ? toolConfig.cooldown : 10000;
+                const elapsed = now - lastUsed;
+                
+                if (elapsed < cooldownTime) {
+                    const ratio = 1 - elapsed / cooldownTime;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    this.roundRect(ctx, x * pr, (y + buttonHeight * (1-ratio)) * pr, buttonWidth * pr, buttonHeight * ratio * pr, 10 * pr);
+                    ctx.fill();
+                    
+                    ctx.fillStyle = '#fff';
+                    ctx.font = `${12 * pr}px Arial`;
+                    ctx.fillText(`${Math.ceil((cooldownTime - elapsed)/1000)}s`, (x + buttonWidth / 2) * pr, (y + buttonHeight / 2) * pr);
+                }
             } else {
                 // 免费标签
                 ctx.fillStyle = '#ffeb3b';
@@ -927,9 +1090,9 @@ class Renderer {
         return { x, y, width: btnWidth, height: btnHeight };
     }
 
-    // 绘制调试面板（仅开发环境）
-    drawDebugPanel(debugState = {}) {
-        if (!__DEV__) return [];
+    // 绘制调试面板（仅开发环境，支持滚动）
+    drawDebugPanel(debugState = {}, scrollY = 0) {
+        if (!__DEV__) return { hitAreas: [], totalContentHeight: 0 };
         
         const ctx = this.ctx;
         const pr = this.pixelRatio;
@@ -938,32 +1101,65 @@ class Renderer {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // 面板 - 扩大高度以容纳更多按钮
+        // 面板尺寸 - 自适应屏幕高度
         const panelWidth = 340;
-        const panelHeight = 680;
+        const visiblePanelHeight = Math.min(850, this.height - 20);
         const panelX = (this.width - panelWidth) / 2;
-        const panelY = (this.height - panelHeight) / 2;
+        const panelY = Math.max(10, (this.height - visiblePanelHeight) / 2);
 
+        // 面板背景
         ctx.fillStyle = '#1a1a2e';
-        this.roundRect(ctx, panelX * pr, panelY * pr, panelWidth * pr, panelHeight * pr, 20 * pr);
+        this.roundRect(ctx, panelX * pr, panelY * pr, panelWidth * pr, visiblePanelHeight * pr, 20 * pr);
         ctx.fill();
 
-        // 标题
+        // === 固定区域：标题 ===
+        const titleAreaHeight = 55;
         ctx.fillStyle = '#fff';
         ctx.font = `bold ${18 * pr}px Arial`;
         ctx.textAlign = 'center';
         ctx.fillText('🔧 调试面板', (this.width / 2) * pr, (panelY + 30) * pr);
-
-        // 提示
         ctx.font = `${10 * pr}px Arial`;
         ctx.fillStyle = '#f39c12';
-        ctx.fillText('⚠️ 仅开发环境可用', (this.width / 2) * pr, (panelY + 48) * pr);
+        ctx.fillText('⚠️ 仅开发环境可用 (可上下滑动)', (this.width / 2) * pr, (panelY + 48) * pr);
 
+        // === 固定区域：关闭按钮 ===
+        const closeAreaHeight = 55;
+        const closeWidth = 120;
+        const closeX = (this.width - closeWidth) / 2;
+        const closeY = panelY + visiblePanelHeight - closeAreaHeight + 5;
+        
+        // 关闭按钮背景（先画，后面内容会被裁剪不覆盖这里）
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(panelX * pr, (closeY - 10) * pr, panelWidth * pr, (closeAreaHeight + 10) * pr);
+        ctx.fillStyle = '#667eea';
+        this.roundRect(ctx, closeX * pr, closeY * pr, closeWidth * pr, 40 * pr, 20 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${14 * pr}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText('关闭', (this.width / 2) * pr, (closeY + 20) * pr);
+
+        // === 可滚动内容区域 ===
+        const contentTop = panelY + titleAreaHeight;
+        const contentBottom = closeY - 10;
+        const contentVisibleHeight = contentBottom - contentTop;
+
+        // 裁剪可滚动区域
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(panelX * pr, contentTop * pr, panelWidth * pr, contentVisibleHeight * pr);
+        ctx.clip();
+
+        // 应用滚动偏移
+        ctx.translate(0, -scrollY * pr);
+
+        // --- 开始绘制可滚动内容 ---
         const hitAreas = [];
         const btnWidth = 100;
         const btnHeight = 32;
         const gap = 8;
-        let currentY = panelY + 65;
+        const halfWidth = (panelWidth - 40 - gap) / 2;
+        let currentY = contentTop + 10;
 
         // === 道具区域 ===
         ctx.fillStyle = '#4a5568';
@@ -992,7 +1188,6 @@ class Renderer {
         currentY += btnHeight + gap;
 
         // 清空道具 + 分数
-        const halfWidth = (panelWidth - 40 - gap) / 2;
         ctx.fillStyle = '#e74c3c';
         this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
         ctx.fill();
@@ -1083,6 +1278,116 @@ class Renderer {
         ctx.fillStyle = '#fff';
         ctx.fillText('🗑️ 清水果', (panelX + 15 + halfWidth + gap + halfWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
         hitAreas.push({ action: 'clearAllFruits', x: panelX + 15 + halfWidth + gap, y: currentY, width: halfWidth, height: btnHeight });
+        currentY += btnHeight + gap;
+
+        // 引力场
+        ctx.fillStyle = '#673ab7';
+        this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, (panelWidth - 30) * pr, btnHeight * pr, 6 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText('🌀 生成引力场', (this.width / 2) * pr, (currentY + btnHeight / 2) * pr);
+        hitAreas.push({ action: 'spawnGravityField', x: panelX + 15, y: currentY, width: panelWidth - 30, height: btnHeight });
+        currentY += btnHeight + 15;
+
+        // === 混沌模式区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('🌀 混沌模式', (panelX + 15) * pr, currentY * pr);
+        currentY += 20;
+
+        const chaosButtons = [
+            { label: '🔮 神器', action: 'triggerArtifact', color: '#9c27b0' },
+            { label: '📳 震动', action: 'triggerShake', color: '#ff9800' },
+            { label: '💨 吹风', action: 'triggerGust', color: '#00bcd4' }
+        ];
+
+        chaosButtons.forEach((btn, i) => {
+            const x = panelX + 15 + i * (btnWidth + gap);
+            ctx.fillStyle = btn.color;
+            this.roundRect(ctx, x * pr, currentY * pr, btnWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: btnWidth, height: btnHeight });
+        });
+        currentY += btnHeight + gap;
+
+        // 开关
+        const chaosToggles = [
+            { label: '🔄 呼吸墙', action: 'toggleLivingJar', key: 'livingJarEnabled' },
+            { label: '⚔️ 切水果', action: 'toggleFruitSlice', key: 'fruitSliceEnabled' }
+        ];
+
+        chaosToggles.forEach((btn, i) => {
+            const x = panelX + 15 + i * (halfWidth + gap);
+            const isEnabled = debugState[btn.key];
+            ctx.fillStyle = isEnabled ? '#2ecc71' : '#7f8c8d';
+            this.roundRect(ctx, x * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            const statusText = isEnabled ? '开' : '关';
+            ctx.fillText(`${btn.label} ${statusText}`, (x + halfWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: halfWidth, height: btnHeight });
+        });
+        currentY += btnHeight + 15;
+
+        // === v2.0 新增功能区域 ===
+        ctx.fillStyle = '#4a5568';
+        ctx.font = `bold ${11 * pr}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText('🆕 v2.0 新增功能', (panelX + 15) * pr, currentY * pr);
+        currentY += 20;
+
+        const newFeatureButtons = [
+            { label: '🎯 穿透+3', action: 'addPiercing', color: '#e91e63' },
+            { label: '💨 蒸发', action: 'triggerVaporize', color: '#ff5722' },
+            { label: '🔀 洗牌', action: 'triggerShuffle', color: '#009688' }
+        ];
+
+        newFeatureButtons.forEach((btn, i) => {
+            const x = panelX + 15 + i * (btnWidth + gap);
+            ctx.fillStyle = btn.color;
+            this.roundRect(ctx, x * pr, currentY * pr, btnWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: btnWidth, height: btnHeight });
+        });
+        currentY += btnHeight + gap;
+
+        const newFeatureButtons2 = [
+            { label: '🔮 反重力', action: 'triggerAntiGravity', color: '#9c27b0' },
+            { label: '🎨 换皮肤', action: 'cycleSkin', color: '#3f51b5' },
+            { label: '📊 统计', action: 'showStats', color: '#607d8b' }
+        ];
+
+        newFeatureButtons2.forEach((btn, i) => {
+            const x = panelX + 15 + i * (btnWidth + gap);
+            ctx.fillStyle = btn.color;
+            this.roundRect(ctx, x * pr, currentY * pr, btnWidth * pr, btnHeight * pr, 6 * pr);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = `${11 * pr}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText(btn.label, (x + btnWidth / 2) * pr, (currentY + btnHeight / 2) * pr);
+            hitAreas.push({ action: btn.action, x, y: currentY, width: btnWidth, height: btnHeight });
+        });
+        currentY += btnHeight + gap;
+
+        // 轨迹预测开关
+        ctx.fillStyle = debugState.showDropGuide ? '#4caf50' : '#9e9e9e';
+        this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, (panelWidth - 30) * pr, btnHeight * pr, 6 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`🎯 轨迹预测: ${debugState.showDropGuide ? '开' : '关'}`, (this.width / 2) * pr, (currentY + btnHeight / 2) * pr);
+        hitAreas.push({ action: 'togglePredictPath', x: panelX + 15, y: currentY, width: panelWidth - 30, height: btnHeight });
         currentY += btnHeight + 15;
 
         // === 系统开关区域 ===
@@ -1142,30 +1447,80 @@ class Renderer {
         stateLines.forEach((line, i) => {
             ctx.fillText(line, (panelX + 25) * pr, (currentY + 18 + i * 16) * pr);
         });
-        currentY += 70;
+        currentY += 80;
 
-        // 关闭按钮
-        const closeWidth = 120;
-        const closeX = (this.width - closeWidth) / 2;
+        // --- 可滚动内容结束 ---
+        const totalContentHeight = currentY - (contentTop + 10);
 
+        // 恢复裁剪（移除滚动偏移和裁剪区域）
+        ctx.restore();
+
+        // 重绘关闭按钮（确保在裁剪恢复后绘制，不被遮挡）
+        // 关闭按钮底部背景
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(panelX * pr, (closeY - 12) * pr, panelWidth * pr, (closeAreaHeight + 12) * pr);
         ctx.fillStyle = '#667eea';
-        this.roundRect(ctx, closeX * pr, currentY * pr, closeWidth * pr, 40 * pr, 20 * pr);
+        this.roundRect(ctx, closeX * pr, closeY * pr, closeWidth * pr, 40 * pr, 20 * pr);
         ctx.fill();
-
         ctx.fillStyle = '#fff';
         ctx.font = `bold ${14 * pr}px Arial`;
         ctx.textAlign = 'center';
-        ctx.fillText('关闭', (this.width / 2) * pr, (currentY + 20) * pr);
+        ctx.fillText('关闭', (this.width / 2) * pr, (closeY + 20) * pr);
 
-        hitAreas.push({
+        // 绘制滚动条指示器
+        if (totalContentHeight > contentVisibleHeight) {
+            const maxScroll = totalContentHeight - contentVisibleHeight;
+            const clampedScroll = Math.max(0, Math.min(scrollY, maxScroll));
+            const scrollRatio = maxScroll > 0 ? clampedScroll / maxScroll : 0;
+            const scrollbarHeight = Math.max(20, contentVisibleHeight * (contentVisibleHeight / totalContentHeight));
+            const scrollbarY = contentTop + scrollRatio * (contentVisibleHeight - scrollbarHeight);
+            
+            // 滚动条轨道
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            this.roundRect(ctx,
+                (panelX + panelWidth - 10) * pr,
+                contentTop * pr,
+                5 * pr,
+                contentVisibleHeight * pr,
+                2.5 * pr
+            );
+            ctx.fill();
+            
+            // 滚动条滑块
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            this.roundRect(ctx,
+                (panelX + panelWidth - 10) * pr,
+                scrollbarY * pr,
+                5 * pr,
+                scrollbarHeight * pr,
+                2.5 * pr
+            );
+            ctx.fill();
+        }
+
+        // 调整 hitAreas 的 y 坐标（从虚拟坐标转换为屏幕坐标）
+        const adjustedHitAreas = [];
+        for (const area of hitAreas) {
+            const screenY = area.y - scrollY;
+            // 只添加在可见区域内的 hitArea
+            if (screenY + area.height > contentTop && screenY < contentBottom) {
+                adjustedHitAreas.push({
+                    ...area,
+                    y: screenY
+                });
+            }
+        }
+
+        // 添加关闭按钮 hitArea（固定位置）
+        adjustedHitAreas.push({
             action: 'close',
             x: closeX,
-            y: currentY,
+            y: closeY,
             width: closeWidth,
             height: 40
         });
 
-        return hitAreas;
+        return { hitAreas: adjustedHitAreas, totalContentHeight: totalContentHeight };
     }
 
     // 绘制排行榜面板
@@ -1354,7 +1709,43 @@ class Renderer {
                 this.drawSnowflakes();
                 this.drawFrostOverlay();
                 break;
+            case 'antiGravity':
+                this.drawAntiGravityEffect();
+                break;
         }
+    }
+
+    /**
+     * 绘制反重力效果
+     */
+    drawAntiGravityEffect() {
+        const ctx = this.ctx;
+        const pr = this.pixelRatio;
+        
+        // 向上飘浮的粒子
+        ctx.fillStyle = 'rgba(200, 150, 255, 0.6)';
+        
+        const time = Date.now() / 1000;
+        for (let i = 0; i < 30; i++) {
+            // 粒子从下往上飘
+            const x = (Math.sin(time + i * 0.7) * 30 + i * 25) % this.width;
+            const y = this.height - ((time * 50 + i * 30) % this.height);
+            const size = 2 + Math.sin(i) * 1.5;
+            
+            ctx.beginPath();
+            ctx.arc(x * pr, y * pr, size * pr, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // 边缘紫色光晕
+        const gradient = ctx.createRadialGradient(
+            this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.3,
+            this.canvas.width / 2, this.canvas.height / 2, this.canvas.width * 0.7
+        );
+        gradient.addColorStop(0, 'rgba(150, 100, 255, 0)');
+        gradient.addColorStop(1, 'rgba(150, 100, 255, 0.15)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
     drawWindParticles() {
@@ -1538,6 +1929,127 @@ class Renderer {
         ctx.restore();
     }
 
+    /**
+     * 绘制动态轨迹预测引导线
+     * @param {number} x - 投放 X 坐标
+     * @param {number} startY - 起始 Y 坐标
+     * @param {number} fruitRadius - 水果半径
+     * @param {Object} gravity - 重力向量 {x, y}
+     * @param {Object} windForce - 风力向量 {x, y} (可选)
+     * @param {Object} gameArea - 游戏区域配置
+     */
+    drawPredictPath(x, startY, fruitRadius, gravity, windForce, gameArea) {
+        const ctx = this.ctx;
+        const pr = this.pixelRatio;
+        
+        // 模拟参数
+        const dt = 1/60;  // 时间步长
+        const steps = 90; // 预测 1.5 秒 (90帧)
+        const points = [];
+        
+        // 初始状态
+        let px = x;
+        let py = startY;
+        let vx = 0;
+        let vy = 0;
+        
+        // 风力（如果存在）
+        const wx = windForce ? windForce.x : 0;
+        const wy = windForce ? windForce.y : 0;
+        
+        // 边界
+        const leftBound = gameArea.left + fruitRadius;
+        const rightBound = gameArea.right - fruitRadius;
+        const bottomBound = gameArea.groundY - fruitRadius;
+        
+        // 模拟轨迹
+        for (let i = 0; i < steps; i++) {
+            points.push({ x: px, y: py });
+            
+            // 应用重力和风力
+            vx += (gravity.x + wx) * dt * 60;
+            vy += (gravity.y + wy) * dt * 60;
+            
+            // 应用空气阻力
+            vx *= 0.98;
+            vy *= 0.98;
+            
+            // 更新位置
+            px += vx * dt * 60;
+            py += vy * dt * 60;
+            
+            // 边界碰撞检测
+            if (px < leftBound) {
+                px = leftBound;
+                vx = -vx * 0.3; // 弹性系数
+            }
+            if (px > rightBound) {
+                px = rightBound;
+                vx = -vx * 0.3;
+            }
+            
+            // 到达地面停止
+            if (py >= bottomBound) {
+                py = bottomBound;
+                points.push({ x: px, y: py });
+                break;
+            }
+        }
+        
+        if (points.length < 2) return;
+        
+        // 绘制轨迹线
+        ctx.save();
+        
+        // 渐变粒子流效果
+        for (let i = 0; i < points.length - 1; i++) {
+            const p1 = points[i];
+            const p2 = points[i + 1];
+            const progress = i / points.length;
+            
+            // 透明度随距离递减
+            const alpha = 0.6 * (1 - progress);
+            
+            ctx.beginPath();
+            ctx.moveTo(p1.x * pr, p1.y * pr);
+            ctx.lineTo(p2.x * pr, p2.y * pr);
+            ctx.strokeStyle = `rgba(255, 215, 0, ${alpha})`;
+            ctx.lineWidth = (3 - progress * 2) * pr;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+        
+        // 绘制轨迹点（粒子效果）
+        for (let i = 0; i < points.length; i += 3) {
+            const p = points[i];
+            const progress = i / points.length;
+            const alpha = 0.8 * (1 - progress);
+            const size = (4 - progress * 3) * pr;
+            
+            ctx.beginPath();
+            ctx.arc(p.x * pr, p.y * pr, size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.fill();
+        }
+        
+        // 绘制预测落点
+        const lastPoint = points[points.length - 1];
+        ctx.beginPath();
+        ctx.arc(lastPoint.x * pr, lastPoint.y * pr, fruitRadius * pr, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+        ctx.lineWidth = 2 * pr;
+        ctx.setLineDash([8 * pr, 4 * pr]);
+        ctx.stroke();
+        
+        // 落点中心标记
+        ctx.beginPath();
+        ctx.arc(lastPoint.x * pr, lastPoint.y * pr, 5 * pr, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
+        ctx.fill();
+        
+        ctx.restore();
+    }
+
     // ==================== 特殊实体渲染 ====================
     
     drawMysteryBox(x, y, radius) {
@@ -1580,6 +2092,88 @@ class Renderer {
         ctx.globalCompositeOperation = 'lighter';
         ctx.fill();
         ctx.globalCompositeOperation = 'source-over';
+    }
+
+    /**
+     * 绘制引力场（微型黑洞）
+     */
+    drawGravityField(x, y, radius, attractRadius, progress) {
+        const ctx = this.ctx;
+        const pr = this.pixelRatio;
+        
+        // 计算脉冲效果
+        const pulsePhase = (Date.now() / 100) % (Math.PI * 2);
+        const pulseFactor = 1 + Math.sin(pulsePhase) * 0.1;
+        
+        ctx.save();
+        
+        // 绘制吸引范围（外圈）
+        ctx.beginPath();
+        ctx.arc(x * pr, y * pr, attractRadius * pulseFactor * pr, 0, Math.PI * 2);
+        const gradientOuter = ctx.createRadialGradient(
+            x * pr, y * pr, 0,
+            x * pr, y * pr, attractRadius * pr
+        );
+        gradientOuter.addColorStop(0, 'rgba(128, 0, 255, 0)');
+        gradientOuter.addColorStop(0.7, 'rgba(128, 0, 255, 0.05)');
+        gradientOuter.addColorStop(1, 'rgba(128, 0, 255, 0.15)');
+        ctx.fillStyle = gradientOuter;
+        ctx.fill();
+        
+        // 绘制旋转线条
+        const lineCount = 8;
+        const rotationSpeed = Date.now() / 500;
+        ctx.strokeStyle = 'rgba(200, 100, 255, 0.4)';
+        ctx.lineWidth = 2 * pr;
+        
+        for (let i = 0; i < lineCount; i++) {
+            const angle = (i / lineCount) * Math.PI * 2 + rotationSpeed;
+            const innerR = radius * 0.5;
+            const outerR = attractRadius * 0.8;
+            
+            ctx.beginPath();
+            // 螺旋线
+            for (let t = 0; t <= 1; t += 0.05) {
+                const r = innerR + (outerR - innerR) * t;
+                const a = angle + t * Math.PI * 0.5;  // 螺旋角度
+                const px = x + Math.cos(a) * r;
+                const py = y + Math.sin(a) * r;
+                if (t === 0) ctx.moveTo(px * pr, py * pr);
+                else ctx.lineTo(px * pr, py * pr);
+            }
+            ctx.stroke();
+        }
+        
+        // 绘制核心（黑洞中心）
+        const coreGradient = ctx.createRadialGradient(
+            x * pr, y * pr, 0,
+            x * pr, y * pr, radius * pr
+        );
+        coreGradient.addColorStop(0, '#1a0033');
+        coreGradient.addColorStop(0.5, '#330066');
+        coreGradient.addColorStop(0.8, '#660099');
+        coreGradient.addColorStop(1, 'rgba(128, 0, 255, 0.5)');
+        
+        ctx.beginPath();
+        ctx.arc(x * pr, y * pr, radius * pulseFactor * pr, 0, Math.PI * 2);
+        ctx.fillStyle = coreGradient;
+        ctx.fill();
+        
+        // 核心高光
+        ctx.beginPath();
+        ctx.arc((x - radius * 0.3) * pr, (y - radius * 0.3) * pr, radius * 0.2 * pr, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.fill();
+        
+        // 剩余时间指示器
+        const remainingRatio = 1 - progress;
+        ctx.beginPath();
+        ctx.arc(x * pr, y * pr, (radius + 5) * pr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * remainingRatio);
+        ctx.strokeStyle = `rgba(200, 100, 255, ${0.8 * remainingRatio})`;
+        ctx.lineWidth = 3 * pr;
+        ctx.stroke();
+        
+        ctx.restore();
     }
 
     drawBomb(x, y, radius, fuseProgress) {
@@ -1633,6 +2227,55 @@ class Renderer {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(String(remaining), x * pr, y * pr);
+    }
+
+    /**
+     * 绘制冰块解冻冲击波特效
+     */
+    drawIceShockwave(x, y, maxRadius, progress) {
+        const ctx = this.ctx;
+        const pr = this.pixelRatio;
+        
+        const currentRadius = maxRadius * progress;
+        const alpha = 0.6 * (1 - progress);
+        
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        
+        // 外圈
+        ctx.beginPath();
+        ctx.arc(x * pr, y * pr, currentRadius * pr, 0, Math.PI * 2);
+        ctx.strokeStyle = '#87CEEB';
+        ctx.lineWidth = (4 - progress * 3) * pr;
+        ctx.stroke();
+        
+        // 内圈渐变
+        const gradient = ctx.createRadialGradient(
+            x * pr, y * pr, 0,
+            x * pr, y * pr, currentRadius * pr
+        );
+        gradient.addColorStop(0, 'rgba(135, 206, 250, 0.3)');
+        gradient.addColorStop(0.5, 'rgba(135, 206, 250, 0.1)');
+        gradient.addColorStop(1, 'rgba(135, 206, 250, 0)');
+        ctx.fillStyle = gradient;
+        ctx.fill();
+        
+        // 冰晶粒子
+        const particleCount = 8;
+        for (let i = 0; i < particleCount; i++) {
+            const angle = (i / particleCount) * Math.PI * 2 + progress * Math.PI;
+            const dist = currentRadius * 0.7;
+            const px = x + Math.cos(angle) * dist;
+            const py = y + Math.sin(angle) * dist;
+            const size = 3 * (1 - progress);
+            
+            ctx.beginPath();
+            ctx.arc(px * pr, py * pr, size * pr, 0, Math.PI * 2);
+            ctx.fillStyle = '#ADD8E6';
+            ctx.fill();
+        }
+        
+        ctx.restore();
     }
 
     drawIceFruit(x, y, radius, fruitLevel, thawProgress = 0) {

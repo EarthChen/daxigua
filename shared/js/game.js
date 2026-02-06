@@ -48,7 +48,7 @@ var MYSTERY_BOX = Config ? Config.MYSTERY_BOX : {};
 var BOMB = Config ? Config.BOMB : {};
 var ICE_BLOCK = Config ? Config.ICE_BLOCK : {};
 var BUFFS = Config ? Config.BUFFS : {};
-var CHAOS = Config ? Config.CHAOS : {};
+var CHAOS = (Config && Config.CHAOS) || {};
 var MERGE_FEEDBACK = Config ? Config.MERGE_FEEDBACK : {};
 var STATS = Config ? Config.STATS : {};
 var ACHIEVEMENTS = Config ? Config.ACHIEVEMENTS : [];
@@ -192,6 +192,12 @@ class Game {
         this.wallPhase = 0;
         this.lastTouchPos = null; // 用于切水果检测
 
+        // ==================== 调试面板滚动 ====================
+        this.debugPanelScrollY = 0;
+        this.debugPanelTotalContentHeight = 0;
+        this.debugPanelDragging = false;
+        this.debugPanelLastTouchY = 0;
+
         // 初始化
         this.init();
     }
@@ -308,9 +314,12 @@ class Game {
                 return;
             }
 
-            // 处理调试面板点击
+            // 处理调试面板点击（记录起始位置用于区分滑动和点击）
             if (this.showingDebugPanel) {
-                this.handleDebugPanelClick(x, y);
+                this.debugPanelDragging = true;
+                this.debugPanelLastTouchY = y;
+                this.debugPanelTouchStartY = y;
+                this.debugPanelTouchMoved = false;
                 return;
             }
 
@@ -360,14 +369,31 @@ class Game {
 
         // 触摸移动
         Platform.onTouchMove((e) => {
-            if (this.isGameOver || this.hammerMode || this.isPaused) return;
-            
             const touch = e.touches[0];
             const x = touch.clientX;
             const y = touch.clientY;
 
+            // 调试面板滚动处理
+            if (this.showingDebugPanel && this.debugPanelDragging) {
+                const deltaY = this.debugPanelLastTouchY - y;
+                if (Math.abs(y - this.debugPanelTouchStartY) > 5) {
+                    this.debugPanelTouchMoved = true;
+                }
+                this.debugPanelLastTouchY = y;
+                
+                // 计算可滚动区域高度
+                const visiblePanelHeight = Math.min(850, this.height - 20);
+                const contentVisibleHeight = visiblePanelHeight - 55 - 55 - 20; // 标题 + 关闭按钮 + 间距
+                const maxScroll = Math.max(0, this.debugPanelTotalContentHeight - contentVisibleHeight);
+                
+                this.debugPanelScrollY = Math.max(0, Math.min(this.debugPanelScrollY + deltaY, maxScroll));
+                return;
+            }
+
+            if (this.isGameOver || this.hammerMode || this.isPaused) return;
+
             // 切水果检测
-            if (CHAOS.fruitSlice && this.lastTouchPos) {
+            if (CHAOS && CHAOS.fruitSlice && this.lastTouchPos) {
                 this.checkFruitSlice(this.lastTouchPos.x, this.lastTouchPos.y, x, y);
             }
             this.lastTouchPos = { x, y };
@@ -378,6 +404,18 @@ class Game {
         // 触摸结束 - 投放水果
         Platform.onTouchEnd((e) => {
             this.lastTouchPos = null;
+
+            // 调试面板：滑动结束后判断是点击还是滚动
+            if (this.showingDebugPanel && this.debugPanelDragging) {
+                this.debugPanelDragging = false;
+                // 如果没有明显移动，视为点击
+                if (!this.debugPanelTouchMoved && e.changedTouches && e.changedTouches.length > 0) {
+                    const endTouch = e.changedTouches[0];
+                    this.handleDebugPanelClick(endTouch.clientX, endTouch.clientY);
+                }
+                return;
+            }
+
             if (this.isGameOver || this.hammerMode) return;
             
             // 检查是否点击了 UI
@@ -617,7 +655,7 @@ class Game {
         this.score += finalScore;
 
         // 检查神器阈值 (Roguelike Artifacts)
-        if (CHAOS.enabled && this.score - this.lastArtifactScore >= CHAOS.artifactThreshold) {
+        if (CHAOS && CHAOS.enabled && this.score - this.lastArtifactScore >= CHAOS.artifactThreshold) {
             this.lastArtifactScore = Math.floor(this.score / CHAOS.artifactThreshold) * CHAOS.artifactThreshold;
             this.showBuffSelector(); // 复用 Buff 选择器作为神器选择
             this.showToast('🔮 神器能量充满！');
@@ -1717,9 +1755,10 @@ class Game {
     // ==================== 混沌模式方法 ====================
 
     updateLivingJar(now) {
-        // 呼吸效果：周期 5秒，幅度 15px
+        // 呼吸效果：周期 5秒，幅度 8px（从15px降低，减少水果过度晃动）
         const phase = (now / 5000) * Math.PI * 2;
-        const breath = Math.sin(phase) * 15;
+        this.wallPhase = phase;  // 保存相位用于渲染
+        const breath = Math.sin(phase) * 8;
         
         // 动态调整墙壁位置
         const leftWall = this.world.walls.find(w => w.label === 'leftWall');
@@ -2009,8 +2048,10 @@ class Game {
     }
 
     useSkill(skillId) {
+        if (!TOOLS[skillId]) return;
+        
         const now = Date.now();
-        const cooldown = TOOLS[skillId].cooldown;
+        const cooldown = TOOLS[skillId].cooldown || 10000;
         const lastUsed = this.skillCooldowns[skillId] || 0;
         
         if (now - lastUsed < cooldown) {
@@ -2332,6 +2373,7 @@ class Game {
         this.isPaused = true;
         this.debugPanelOpenTime = Date.now();  // 防抖：记录打开时间
         this.debugPanelHitAreas = [];  // 清空点击区域，等待下一帧渲染
+        this.debugPanelScrollY = 0;    // 重置滚动位置
     }
 
     hideDebugPanel() {
@@ -2627,7 +2669,7 @@ class Game {
             this.updateGravityFields();
 
             // 呼吸墙壁
-            if (CHAOS.livingJar) {
+            if (CHAOS && CHAOS.livingJar) {
                 this.updateLivingJar(now);
             }
         }
@@ -2734,8 +2776,14 @@ class Game {
             renderer.drawWeatherOverlay(this.currentWeather);
         }
 
-        // 绘制墙壁和地面
-        renderer.drawWalls();
+        // 绘制墙壁和地面（传递墙壁状态用于可视化）
+        const wallState = {
+            leftX: this.gameArea.left,
+            rightX: this.gameArea.right,
+            isBreathing: !!(CHAOS && CHAOS.livingJar),
+            breathPhase: this.wallPhase
+        };
+        renderer.drawWalls(wallState);
 
         // 绘制游戏结束线
         renderer.drawGameOverLine(this.gameArea.gameOverLineY);
@@ -2880,9 +2928,11 @@ class Game {
             this.sharePanelHitAreas = renderer.drawSharePanel();
         }
 
-        // 绘制调试面板（仅开发环境）
+        // 绘制调试面板（仅开发环境，支持滚动）
         if (__DEV__ && this.showingDebugPanel) {
-            this.debugPanelHitAreas = renderer.drawDebugPanel(this.getDebugState());
+            const result = renderer.drawDebugPanel(this.getDebugState(), this.debugPanelScrollY);
+            this.debugPanelHitAreas = result.hitAreas;
+            this.debugPanelTotalContentHeight = result.totalContentHeight;
         }
 
         // 绘制调试按钮（仅开发环境）

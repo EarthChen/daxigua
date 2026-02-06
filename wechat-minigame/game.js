@@ -14,9 +14,12 @@ console.log('[游戏] 系统信息:', systemInfo.model, systemInfo.system);
 const canvas = wx.createCanvas();
 const ctx = canvas.getContext('2d');
 
+// 限制像素比，避免高分辨率设备上过度渲染导致卡顿
+const pixelRatio = Math.min(systemInfo.pixelRatio, 2);
+
 // 设置画布尺寸
-canvas.width = systemInfo.windowWidth * systemInfo.pixelRatio;
-canvas.height = systemInfo.windowHeight * systemInfo.pixelRatio;
+canvas.width = systemInfo.windowWidth * pixelRatio;
+canvas.height = systemInfo.windowHeight * pixelRatio;
 
 // 游戏配置
 const gameConfig = {
@@ -24,7 +27,7 @@ const gameConfig = {
     ctx: ctx,
     width: systemInfo.windowWidth,
     height: systemInfo.windowHeight,
-    pixelRatio: systemInfo.pixelRatio,
+    pixelRatio: pixelRatio,
     designWidth: 375,  // 设计宽度（iPhone 6/7/8）
     designHeight: 667  // 设计高度
 };

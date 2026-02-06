@@ -30,6 +30,8 @@ var BOMB = Config ? Config.BOMB : {};
 var ICE_BLOCK = Config ? Config.ICE_BLOCK : {};
 var BUFFS = Config ? Config.BUFFS : {};
 var SKINS = Config ? Config.SKINS : {};
+var TOOLS = Config ? Config.TOOLS : {};
+var CHAOS = (Config && Config.CHAOS) || {};
 
 class Renderer {
     constructor(config) {
@@ -128,7 +130,7 @@ class Renderer {
     }
 
     // 绘制墙壁和地面
-    drawWalls() {
+    drawWalls(wallState) {
         const ctx = this.ctx;
         const pr = this.pixelRatio;
         const ga = this.gameArea;
@@ -156,6 +158,94 @@ class Renderer {
         ctx.fillStyle = groundConfig.midColor;
         const stripeHeight = 10 * pr;
         ctx.fillRect(0, ga.groundY * pr, this.canvas.width, stripeHeight);
+
+        // 绘制侧墙壁
+        this.drawSideWalls(wallState);
+    }
+
+    // 绘制可见的侧墙壁
+    drawSideWalls(wallState) {
+        const ctx = this.ctx;
+        const pr = this.pixelRatio;
+        const ga = this.gameArea;
+
+        // 墙壁位置：优先使用传入的实际物理墙壁位置
+        const leftX = wallState ? wallState.leftX : ga.left;
+        const rightX = wallState ? wallState.rightX : ga.right;
+        const isBreathing = wallState ? wallState.isBreathing : false;
+        const breathPhase = wallState ? wallState.breathPhase : 0;
+
+        const topY = ga.top;
+        const bottomY = ga.groundY;
+        const wallWidth = 5;
+
+        // 使用皮肤的地面颜色作为墙壁基色
+        const groundConfig = this.skinConfig.ground || { topColor: '#8B4513', midColor: '#654321' };
+
+        // 左墙壁
+        const leftGradient = ctx.createLinearGradient(
+            (leftX - wallWidth) * pr, 0,
+            (leftX + 2) * pr, 0
+        );
+        leftGradient.addColorStop(0, 'rgba(101, 67, 33, 0.3)');
+        leftGradient.addColorStop(0.5, 'rgba(139, 69, 19, 0.6)');
+        leftGradient.addColorStop(1, 'rgba(101, 67, 33, 0.2)');
+        ctx.fillStyle = leftGradient;
+        ctx.fillRect(
+            (leftX - wallWidth) * pr, topY * pr,
+            (wallWidth + 1) * pr, (bottomY - topY) * pr
+        );
+
+        // 右墙壁
+        const rightGradient = ctx.createLinearGradient(
+            (rightX - 2) * pr, 0,
+            (rightX + wallWidth) * pr, 0
+        );
+        rightGradient.addColorStop(0, 'rgba(101, 67, 33, 0.2)');
+        rightGradient.addColorStop(0.5, 'rgba(139, 69, 19, 0.6)');
+        rightGradient.addColorStop(1, 'rgba(101, 67, 33, 0.3)');
+        ctx.fillStyle = rightGradient;
+        ctx.fillRect(
+            (rightX - 1) * pr, topY * pr,
+            (wallWidth + 1) * pr, (bottomY - topY) * pr
+        );
+
+        // 呼吸模式视觉效果
+        if (isBreathing) {
+            const pulseAlpha = 0.1 + Math.abs(Math.sin(breathPhase)) * 0.25;
+            
+            // 左墙壁内侧发光
+            const leftGlow = ctx.createLinearGradient(
+                leftX * pr, 0,
+                (leftX + 12) * pr, 0
+            );
+            leftGlow.addColorStop(0, `rgba(255, 180, 60, ${pulseAlpha})`);
+            leftGlow.addColorStop(1, 'rgba(255, 180, 60, 0)');
+            ctx.fillStyle = leftGlow;
+            ctx.fillRect(leftX * pr, topY * pr, 12 * pr, (bottomY - topY) * pr);
+
+            // 右墙壁内侧发光
+            const rightGlow = ctx.createLinearGradient(
+                (rightX - 12) * pr, 0,
+                rightX * pr, 0
+            );
+            rightGlow.addColorStop(0, 'rgba(255, 180, 60, 0)');
+            rightGlow.addColorStop(1, `rgba(255, 180, 60, ${pulseAlpha})`);
+            ctx.fillStyle = rightGlow;
+            ctx.fillRect((rightX - 12) * pr, topY * pr, 12 * pr, (bottomY - topY) * pr);
+
+            // 墙壁边缘高亮线
+            ctx.strokeStyle = `rgba(255, 200, 80, ${pulseAlpha * 1.5})`;
+            ctx.lineWidth = 2 * pr;
+            ctx.beginPath();
+            ctx.moveTo(leftX * pr, topY * pr);
+            ctx.lineTo(leftX * pr, bottomY * pr);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(rightX * pr, topY * pr);
+            ctx.lineTo(rightX * pr, bottomY * pr);
+            ctx.stroke();
+        }
     }
 
     // 绘制游戏结束线
@@ -536,7 +626,9 @@ class Renderer {
                 // 冷却遮罩
                 const now = Date.now();
                 const lastUsed = skillCooldowns[btn.id] || 0;
-                const cooldownTime = TOOLS[btn.id].cooldown;
+                // 防御性检查
+                const toolConfig = TOOLS[btn.id];
+                const cooldownTime = toolConfig ? toolConfig.cooldown : 10000;
                 const elapsed = now - lastUsed;
                 
                 if (elapsed < cooldownTime) {
@@ -998,9 +1090,9 @@ class Renderer {
         return { x, y, width: btnWidth, height: btnHeight };
     }
 
-    // 绘制调试面板（仅开发环境）
-    drawDebugPanel(debugState = {}) {
-        if (!__DEV__) return [];
+    // 绘制调试面板（仅开发环境，支持滚动）
+    drawDebugPanel(debugState = {}, scrollY = 0) {
+        if (!__DEV__) return { hitAreas: [], totalContentHeight: 0 };
         
         const ctx = this.ctx;
         const pr = this.pixelRatio;
@@ -1009,32 +1101,65 @@ class Renderer {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // 面板 - 扩大高度以容纳更多按钮
+        // 面板尺寸 - 自适应屏幕高度
         const panelWidth = 340;
-        const panelHeight = 850;
+        const visiblePanelHeight = Math.min(850, this.height - 20);
         const panelX = (this.width - panelWidth) / 2;
-        const panelY = Math.max(10, (this.height - panelHeight) / 2);
+        const panelY = Math.max(10, (this.height - visiblePanelHeight) / 2);
 
+        // 面板背景
         ctx.fillStyle = '#1a1a2e';
-        this.roundRect(ctx, panelX * pr, panelY * pr, panelWidth * pr, panelHeight * pr, 20 * pr);
+        this.roundRect(ctx, panelX * pr, panelY * pr, panelWidth * pr, visiblePanelHeight * pr, 20 * pr);
         ctx.fill();
 
-        // 标题
+        // === 固定区域：标题 ===
+        const titleAreaHeight = 55;
         ctx.fillStyle = '#fff';
         ctx.font = `bold ${18 * pr}px Arial`;
         ctx.textAlign = 'center';
         ctx.fillText('🔧 调试面板', (this.width / 2) * pr, (panelY + 30) * pr);
-
-        // 提示
         ctx.font = `${10 * pr}px Arial`;
         ctx.fillStyle = '#f39c12';
-        ctx.fillText('⚠️ 仅开发环境可用', (this.width / 2) * pr, (panelY + 48) * pr);
+        ctx.fillText('⚠️ 仅开发环境可用 (可上下滑动)', (this.width / 2) * pr, (panelY + 48) * pr);
 
+        // === 固定区域：关闭按钮 ===
+        const closeAreaHeight = 55;
+        const closeWidth = 120;
+        const closeX = (this.width - closeWidth) / 2;
+        const closeY = panelY + visiblePanelHeight - closeAreaHeight + 5;
+        
+        // 关闭按钮背景（先画，后面内容会被裁剪不覆盖这里）
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(panelX * pr, (closeY - 10) * pr, panelWidth * pr, (closeAreaHeight + 10) * pr);
+        ctx.fillStyle = '#667eea';
+        this.roundRect(ctx, closeX * pr, closeY * pr, closeWidth * pr, 40 * pr, 20 * pr);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${14 * pr}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.fillText('关闭', (this.width / 2) * pr, (closeY + 20) * pr);
+
+        // === 可滚动内容区域 ===
+        const contentTop = panelY + titleAreaHeight;
+        const contentBottom = closeY - 10;
+        const contentVisibleHeight = contentBottom - contentTop;
+
+        // 裁剪可滚动区域
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(panelX * pr, contentTop * pr, panelWidth * pr, contentVisibleHeight * pr);
+        ctx.clip();
+
+        // 应用滚动偏移
+        ctx.translate(0, -scrollY * pr);
+
+        // --- 开始绘制可滚动内容 ---
         const hitAreas = [];
         const btnWidth = 100;
         const btnHeight = 32;
         const gap = 8;
-        let currentY = panelY + 65;
+        const halfWidth = (panelWidth - 40 - gap) / 2;
+        let currentY = contentTop + 10;
 
         // === 道具区域 ===
         ctx.fillStyle = '#4a5568';
@@ -1063,7 +1188,6 @@ class Renderer {
         currentY += btnHeight + gap;
 
         // 清空道具 + 分数
-        const halfWidth = (panelWidth - 40 - gap) / 2;
         ctx.fillStyle = '#e74c3c';
         this.roundRect(ctx, (panelX + 15) * pr, currentY * pr, halfWidth * pr, btnHeight * pr, 6 * pr);
         ctx.fill();
@@ -1323,30 +1447,80 @@ class Renderer {
         stateLines.forEach((line, i) => {
             ctx.fillText(line, (panelX + 25) * pr, (currentY + 18 + i * 16) * pr);
         });
-        currentY += 70;
+        currentY += 80;
 
-        // 关闭按钮
-        const closeWidth = 120;
-        const closeX = (this.width - closeWidth) / 2;
+        // --- 可滚动内容结束 ---
+        const totalContentHeight = currentY - (contentTop + 10);
 
+        // 恢复裁剪（移除滚动偏移和裁剪区域）
+        ctx.restore();
+
+        // 重绘关闭按钮（确保在裁剪恢复后绘制，不被遮挡）
+        // 关闭按钮底部背景
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(panelX * pr, (closeY - 12) * pr, panelWidth * pr, (closeAreaHeight + 12) * pr);
         ctx.fillStyle = '#667eea';
-        this.roundRect(ctx, closeX * pr, currentY * pr, closeWidth * pr, 40 * pr, 20 * pr);
+        this.roundRect(ctx, closeX * pr, closeY * pr, closeWidth * pr, 40 * pr, 20 * pr);
         ctx.fill();
-
         ctx.fillStyle = '#fff';
         ctx.font = `bold ${14 * pr}px Arial`;
         ctx.textAlign = 'center';
-        ctx.fillText('关闭', (this.width / 2) * pr, (currentY + 20) * pr);
+        ctx.fillText('关闭', (this.width / 2) * pr, (closeY + 20) * pr);
 
-        hitAreas.push({
+        // 绘制滚动条指示器
+        if (totalContentHeight > contentVisibleHeight) {
+            const maxScroll = totalContentHeight - contentVisibleHeight;
+            const clampedScroll = Math.max(0, Math.min(scrollY, maxScroll));
+            const scrollRatio = maxScroll > 0 ? clampedScroll / maxScroll : 0;
+            const scrollbarHeight = Math.max(20, contentVisibleHeight * (contentVisibleHeight / totalContentHeight));
+            const scrollbarY = contentTop + scrollRatio * (contentVisibleHeight - scrollbarHeight);
+            
+            // 滚动条轨道
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            this.roundRect(ctx,
+                (panelX + panelWidth - 10) * pr,
+                contentTop * pr,
+                5 * pr,
+                contentVisibleHeight * pr,
+                2.5 * pr
+            );
+            ctx.fill();
+            
+            // 滚动条滑块
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            this.roundRect(ctx,
+                (panelX + panelWidth - 10) * pr,
+                scrollbarY * pr,
+                5 * pr,
+                scrollbarHeight * pr,
+                2.5 * pr
+            );
+            ctx.fill();
+        }
+
+        // 调整 hitAreas 的 y 坐标（从虚拟坐标转换为屏幕坐标）
+        const adjustedHitAreas = [];
+        for (const area of hitAreas) {
+            const screenY = area.y - scrollY;
+            // 只添加在可见区域内的 hitArea
+            if (screenY + area.height > contentTop && screenY < contentBottom) {
+                adjustedHitAreas.push({
+                    ...area,
+                    y: screenY
+                });
+            }
+        }
+
+        // 添加关闭按钮 hitArea（固定位置）
+        adjustedHitAreas.push({
             action: 'close',
             x: closeX,
-            y: currentY,
+            y: closeY,
             width: closeWidth,
             height: 40
         });
 
-        return hitAreas;
+        return { hitAreas: adjustedHitAreas, totalContentHeight: totalContentHeight };
     }
 
     // 绘制排行榜面板
