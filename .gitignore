@@ -1,8 +1,58 @@
-.idea
-.vercel
-node_modules
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Cache
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Test / Coverage
+coverage/
+.nyc_output/
+
+# Deployment
+.vercel/
+
+# Cursor / Playwright
 .cursor/
 .playwright-mcp/
+
+# Project-specific
 backup-cocos2d-web/
-shut/ 
+shut/
 plan.md
+.docs/PROPOSALS/
